@@ -308,7 +308,7 @@
             <span class="subtitle"> — 纯语音控制AI绘图工具</span>
         </div>
         <div style="font-size:0.8em;color:var(--text-secondary);">
-            v1.0.0 | 浏览器语音API驱动
+            v1.2.0 | 浏览器语音API驱动 | 语音自动绘图 + 复合指令
         </div>
     </header>
 
@@ -421,6 +421,12 @@
 
         // AI接口预留
         aiEndpoint: '',  // 后续填入API地址
+
+        // 图形注册表（v1.2.0 新增）
+        drawnShapes: [],          // 所有自动绘制的图形描述符数组
+        nextShapeId: 0,          // 自增唯一ID
+        lastDrawnShapeId: null,  // 最近绘制图形的ID（用于"当前图形"引用）
+        baseSnapshot: null,      // 首次自动绘图前的画布快照（保护自由绘制层）
     };
 
     // =========================== DOM引用 ===========================
@@ -469,14 +475,29 @@
         if (STATE.undoStack.length > STATE.maxUndo) {
             STATE.undoStack.shift();
         }
-        document.getElementById('statusShapes').textContent = STATE.undoStack.length - 1;
+        document.getElementById('statusShapes').textContent =
+            STATE.drawnShapes.length > 0 ? STATE.drawnShapes.length : Math.max(0, STATE.undoStack.length - 1);
     }
 
     function undo() {
+        // 注册表撤销：弹出最后一个自动绘制图形
+        if (STATE.drawnShapes.length > 0) {
+            STATE.drawnShapes.pop();
+            STATE.lastDrawnShapeId = STATE.drawnShapes.length > 0
+                ? STATE.drawnShapes[STATE.drawnShapes.length - 1].id : null;
+            if (STATE.drawnShapes.length === 0) {
+                STATE.baseSnapshot = null;
+                STATE.nextShapeId = 0;
+            }
+            redrawAllShapes();
+            saveSnapshot();
+            updateStatus();
+            return true;
+        }
+        // 快照撤销：用于自由绘制内容
         if (STATE.undoStack.length > 1) {
-            STATE.undoStack.pop(); // 丢弃当前状态
-            const prev = STATE.undoStack[STATE.undoStack.length - 1];
-            ctx.putImageData(prev, 0, 0);
+            STATE.undoStack.pop();
+            ctx.putImageData(STATE.undoStack[STATE.undoStack.length - 1], 0, 0);
             updateStatus();
             return true;
         }
@@ -484,6 +505,10 @@
     }
 
     function clearCanvas() {
+        STATE.drawnShapes = [];
+        STATE.nextShapeId = 0;
+        STATE.lastDrawnShapeId = null;
+        STATE.baseSnapshot = null;
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         saveSnapshot();
@@ -492,6 +517,10 @@
     }
 
     function resetAll() {
+        STATE.drawnShapes = [];
+        STATE.nextShapeId = 0;
+        STATE.lastDrawnShapeId = null;
+        STATE.baseSnapshot = null;
         STATE.currentColor = '#e94560';
         STATE.currentLineWidth = 3;
         STATE.drawMode = 'freehand';
@@ -505,7 +534,7 @@
 
     function updateStatus() {
         document.getElementById('statusShapes').textContent =
-            Math.max(0, STATE.undoStack.length - 1);
+            STATE.drawnShapes.length > 0 ? STATE.drawnShapes.length : Math.max(0, STATE.undoStack.length - 1);
         document.getElementById('statusCmds').textContent = STATE.commandCount;
     }
 
@@ -675,6 +704,417 @@
         ctx.putImageData(imageData, 0, 0);
     }
 
+    // =========================== 自动绘图（语音触发） ===========================
+    const autoDrawState = {
+        stepIndex: 0,
+        positionOverride: null,  // 一次性位置覆盖（方位指令设置）
+
+        getNextPosition() {
+            if (this.positionOverride) {
+                const pos = this.positionOverride;
+                this.positionOverride = null;
+                return pos;
+            }
+            const cols = 4;
+            const maxRows = 5;
+            const col = this.stepIndex % cols;
+            const row = Math.floor(this.stepIndex / cols) % maxRows;
+            this.stepIndex++;
+            if (this.stepIndex >= cols * maxRows) {
+                this.stepIndex = 0;
+            }
+            return {
+                x: canvas.width * (0.12 + col * 0.25),
+                y: canvas.height * (0.12 + row * 0.2),
+            };
+        },
+
+        setOverride(x, y) {
+            this.positionOverride = { x, y };
+        },
+    };
+
+    function ensureBaseSnapshot() {
+        if (STATE.drawnShapes.length === 0 && !STATE.baseSnapshot) {
+            STATE.baseSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        }
+    }
+
+    /**
+     * 语音触发自动绘制直线
+     * @param {'horizontal'|'vertical'|'diagonal'} direction - 线条方向
+     * @param {{x, y}|null} overridePos - 可选的位置覆盖
+     */
+    function autoDrawLine(direction, overridePos) {
+        if (overridePos) autoDrawState.setOverride(overridePos.x, overridePos.y);
+        const pos = autoDrawState.getNextPosition();
+        const length = Math.min(canvas.width, canvas.height) * 0.22;
+
+        let x1, y1, x2, y2;
+        if (direction === 'vertical') {
+            x1 = x2 = pos.x; y1 = pos.y - length / 2; y2 = pos.y + length / 2;
+        } else if (direction === 'diagonal') {
+            x1 = pos.x - length / 2; y1 = pos.y - length / 2;
+            x2 = pos.x + length / 2; y2 = pos.y + length / 2;
+        } else {
+            x1 = pos.x - length / 2; y1 = pos.y;
+            x2 = pos.x + length / 2; y2 = pos.y;
+        }
+
+        ensureBaseSnapshot();
+        registerShape('line', { x1, y1, x2, y2, direction });
+        redrawAllShapes();
+        saveSnapshot();
+        STATE.shapeCount++;
+        updateStatus();
+    }
+
+    function autoDrawCircle(overridePos) {
+        if (overridePos) autoDrawState.setOverride(overridePos.x, overridePos.y);
+        const pos = autoDrawState.getNextPosition();
+        const radius = Math.min(canvas.width, canvas.height) * 0.08;
+
+        ensureBaseSnapshot();
+        registerShape('circle', { cx: pos.x, cy: pos.y, r: radius });
+        redrawAllShapes();
+        saveSnapshot();
+        STATE.shapeCount++;
+        updateStatus();
+    }
+
+    function autoDrawRectangle(overridePos) {
+        if (overridePos) autoDrawState.setOverride(overridePos.x, overridePos.y);
+        const pos = autoDrawState.getNextPosition();
+        const w = Math.min(canvas.width, canvas.height) * 0.18;
+        const h = w * 0.7;
+
+        ensureBaseSnapshot();
+        registerShape('rectangle', { x: pos.x - w / 2, y: pos.y - h / 2, w, h });
+        redrawAllShapes();
+        saveSnapshot();
+        STATE.shapeCount++;
+        updateStatus();
+    }
+
+    /**
+     * 语音触发自动绘制正方形
+     */
+    function autoDrawSquare(overridePos, size) {
+        if (overridePos) autoDrawState.setOverride(overridePos.x, overridePos.y);
+        const pos = autoDrawState.getNextPosition();
+        if (!size) size = Math.min(canvas.width, canvas.height) * 0.15;
+
+        ensureBaseSnapshot();
+        registerShape('square', { cx: pos.x, cy: pos.y, size });
+        redrawAllShapes();
+        saveSnapshot();
+        STATE.shapeCount++;
+        updateStatus();
+    }
+
+    /**
+     * 语音触发自动绘制椭圆
+     */
+    function autoDrawEllipse(overridePos, rx, ry) {
+        if (overridePos) autoDrawState.setOverride(overridePos.x, overridePos.y);
+        const pos = autoDrawState.getNextPosition();
+        rx = rx || Math.min(canvas.width, canvas.height) * 0.10;
+        ry = ry || rx * 0.6;
+
+        ensureBaseSnapshot();
+        registerShape('ellipse', { cx: pos.x, cy: pos.y, rx, ry });
+        redrawAllShapes();
+        saveSnapshot();
+        STATE.shapeCount++;
+        updateStatus();
+    }
+
+    /**
+     * 语音触发自动绘制等边三角形
+     */
+    function autoDrawTriangle(overridePos, size) {
+        if (overridePos) autoDrawState.setOverride(overridePos.x, overridePos.y);
+        const pos = autoDrawState.getNextPosition();
+        if (!size) size = Math.min(canvas.width, canvas.height) * 0.12;
+
+        ensureBaseSnapshot();
+        registerShape('triangle', { cx: pos.x, cy: pos.y, size });
+        redrawAllShapes();
+        saveSnapshot();
+        STATE.shapeCount++;
+        updateStatus();
+    }
+
+    // =========================== 方位与图形名常量（v1.2.0） ===========================
+    const POSITION_ZONES = {
+        '左上角': { x: 0.12, y: 0.15 }, '右上角': { x: 0.88, y: 0.15 },
+        '左下角': { x: 0.12, y: 0.85 }, '右下角': { x: 0.88, y: 0.85 },
+        '上方': { x: 0.50, y: 0.12 }, '上面': { x: 0.50, y: 0.12 },
+        '下方': { x: 0.50, y: 0.88 }, '下面': { x: 0.50, y: 0.88 },
+        '左边': { x: 0.10, y: 0.50 }, '右边': { x: 0.90, y: 0.50 },
+        '中间': { x: 0.50, y: 0.50 }, '中心': { x: 0.50, y: 0.50 }, '中央': { x: 0.50, y: 0.50 },
+    };
+
+    const SHAPE_NAME_MAP = {
+        '圆': 'circle', '圆形': 'circle', '圆圈': 'circle', '圈': 'circle',
+        '椭圆': 'ellipse', '椭圆形': 'ellipse',
+        '矩形': 'rectangle', '长方形': 'rectangle',
+        '正方形': 'square', '方块': 'square', '方形': 'square',
+        '三角形': 'triangle', '三角': 'triangle',
+        '线': 'line', '直线': 'line', '横线': 'line', '竖线': 'line', '斜线': 'line',
+    };
+
+    // =========================== 颜色工具（v1.2.0） ===========================
+    function hexToHSL(hex) {
+        let r = parseInt(hex.slice(1, 3), 16) / 255;
+        let g = parseInt(hex.slice(3, 5), 16) / 255;
+        let b = parseInt(hex.slice(5, 7), 16) / 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h = 0, s = 0, l = (max + min) / 2;
+        if (max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+                case g: h = ((b - r) / d + 2) / 6; break;
+                case b: h = ((r - g) / d + 4) / 6; break;
+            }
+        }
+        return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
+    }
+
+    function hslToHex(h, s, l) {
+        h /= 360; s /= 100; l /= 100;
+        const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1; if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        };
+        if (s === 0) {
+            const v = Math.round(l * 255);
+            return '#' + [v, v, v].map(x => x.toString(16).padStart(2, '0')).join('');
+        }
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        const r = Math.round(hue2rgb(p, q, h + 1/3) * 255);
+        const g = Math.round(hue2rgb(p, q, h) * 255);
+        const b = Math.round(hue2rgb(p, q, h - 1/3) * 255);
+        return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+    }
+
+    function darkenColor(hex, amount = 15) {
+        const [h, s, l] = hexToHSL(hex);
+        return hslToHex(h, s, Math.max(0, l - amount));
+    }
+
+    function lightenColor(hex, amount = 15) {
+        const [h, s, l] = hexToHSL(hex);
+        return hslToHex(h, s, Math.min(100, l + amount));
+    }
+
+    function adjustBrightness(hex, delta) {
+        const [h, s, l] = hexToHSL(hex);
+        return hslToHex(h, s, Math.max(0, Math.min(100, l + delta)));
+    }
+
+    // =========================== 图形注册表 CRUD（v1.2.0） ===========================
+    function registerShape(type, params, color, fillColor, lineWidth) {
+        const shape = {
+            id: STATE.nextShapeId++,
+            type: type,
+            color: color || STATE.currentColor,
+            fillColor: fillColor || null,
+            lineWidth: lineWidth || STATE.currentLineWidth,
+            params: params,
+        };
+        STATE.drawnShapes.push(shape);
+        STATE.lastDrawnShapeId = shape.id;
+        return shape;
+    }
+
+    function drawShapeFromRegistry(shape) {
+        ctx.save();
+        ctx.strokeStyle = shape.color;
+        ctx.lineWidth = shape.lineWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+
+        switch (shape.type) {
+            case 'circle':
+                ctx.arc(shape.params.cx, shape.params.cy, shape.params.r, 0, Math.PI * 2);
+                break;
+            case 'ellipse':
+                ctx.ellipse(shape.params.cx, shape.params.cy, shape.params.rx, shape.params.ry, 0, 0, Math.PI * 2);
+                break;
+            case 'rectangle':
+                ctx.rect(shape.params.x, shape.params.y, shape.params.w, shape.params.h);
+                break;
+            case 'square': {
+                const s = shape.params.size;
+                ctx.rect(shape.params.cx - s / 2, shape.params.cy - s / 2, s, s);
+                break;
+            }
+            case 'triangle': {
+                const { cx, cy, size } = shape.params;
+                const h = size * Math.sqrt(3) / 2;
+                ctx.moveTo(cx, cy - h * 2/3);
+                ctx.lineTo(cx - size / 2, cy + h * 1/3);
+                ctx.lineTo(cx + size / 2, cy + h * 1/3);
+                ctx.closePath();
+                break;
+            }
+            case 'line':
+                ctx.moveTo(shape.params.x1, shape.params.y1);
+                ctx.lineTo(shape.params.x2, shape.params.y2);
+                break;
+        }
+
+        if (shape.fillColor) {
+            ctx.fillStyle = shape.fillColor;
+            ctx.fill();
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function redrawAllShapes() {
+        if (STATE.baseSnapshot) {
+            ctx.putImageData(STATE.baseSnapshot, 0, 0);
+        } else {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        for (const shape of STATE.drawnShapes) {
+            drawShapeFromRegistry(shape);
+        }
+    }
+
+    function findShapes(filter) {
+        return STATE.drawnShapes.filter(shape => {
+            if (filter.type && shape.type !== filter.type) return false;
+            if (filter.color && shape.color !== filter.color) return false;
+            if (filter.id !== undefined && shape.id !== filter.id) return false;
+            return true;
+        });
+    }
+
+    function removeShapes(filter) {
+        const before = STATE.drawnShapes.length;
+        STATE.drawnShapes = STATE.drawnShapes.filter(shape => {
+            if (filter.type && shape.type !== filter.type) return true;
+            if (filter.color && shape.color !== filter.color) return true;
+            if (filter.id !== undefined && shape.id !== filter.id) return true;
+            return false;
+        });
+        const removed = before - STATE.drawnShapes.length;
+        if (removed > 0) {
+            if (STATE.drawnShapes.length === 0) { STATE.baseSnapshot = null; STATE.nextShapeId = 0; STATE.lastDrawnShapeId = null; }
+            else STATE.lastDrawnShapeId = STATE.drawnShapes[STATE.drawnShapes.length - 1].id;
+            redrawAllShapes();
+            saveSnapshot();
+            updateStatus();
+        }
+        return removed;
+    }
+
+    function fillRegisteredShapes(filter, fillColorHex) {
+        let count = 0;
+        for (const shape of STATE.drawnShapes) {
+            let match = true;
+            if (filter.type && shape.type !== filter.type) match = false;
+            if (filter.color && shape.color !== filter.color) match = false;
+            if (match) { shape.fillColor = fillColorHex; count++; }
+        }
+        if (count > 0) { redrawAllShapes(); saveSnapshot(); updateStatus(); }
+        return count;
+    }
+
+    function resizeShape(id, scaleFactor) {
+        const shape = STATE.drawnShapes.find(s => s.id === id);
+        if (!shape) return false;
+        const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+        const maxDim = Math.max(canvas.width, canvas.height);
+
+        switch (shape.type) {
+            case 'circle':
+                shape.params.r = clamp(shape.params.r * scaleFactor, 3, maxDim);
+                break;
+            case 'ellipse':
+                shape.params.rx = clamp(shape.params.rx * scaleFactor, 3, maxDim);
+                shape.params.ry = clamp(shape.params.ry * scaleFactor, 3, maxDim);
+                break;
+            case 'square':
+                shape.params.size = clamp(shape.params.size * Math.sqrt(scaleFactor), 6, maxDim);
+                break;
+            case 'rectangle':
+                shape.params.w = clamp(shape.params.w * scaleFactor, 6, maxDim);
+                shape.params.h = clamp(shape.params.h * scaleFactor, 6, maxDim);
+                break;
+            case 'triangle':
+                shape.params.size = clamp(shape.params.size * scaleFactor, 5, maxDim);
+                break;
+            case 'line': {
+                const mx = (shape.params.x1 + shape.params.x2) / 2;
+                const my = (shape.params.y1 + shape.params.y2) / 2;
+                shape.params.x1 = mx + (shape.params.x1 - mx) * scaleFactor;
+                shape.params.y1 = my + (shape.params.y1 - my) * scaleFactor;
+                shape.params.x2 = mx + (shape.params.x2 - mx) * scaleFactor;
+                shape.params.y2 = my + (shape.params.y2 - my) * scaleFactor;
+                break;
+            }
+        }
+        redrawAllShapes();
+        saveSnapshot();
+        updateStatus();
+        return true;
+    }
+
+    // =========================== 解析辅助函数（v1.2.0） ===========================
+    function parsePosition(text) {
+        let bestMatch = null, bestLen = 0;
+        for (const [keyword, ratio] of Object.entries(POSITION_ZONES)) {
+            if (text.includes(keyword) && keyword.length > bestLen) {
+                bestMatch = ratio; bestLen = keyword.length;
+            }
+        }
+        if (!bestMatch) {
+            const hasShang = text.includes('上'), hasXia = text.includes('下');
+            const hasZuo = text.includes('左'), hasYou = text.includes('右'), hasJiao = text.includes('角');
+            if (hasJiao && hasShang && hasYou) bestMatch = POSITION_ZONES['右上角'];
+            else if (hasJiao && hasShang && hasZuo) bestMatch = POSITION_ZONES['左上角'];
+            else if (hasJiao && hasXia && hasYou) bestMatch = POSITION_ZONES['右下角'];
+            else if (hasJiao && hasXia && hasZuo) bestMatch = POSITION_ZONES['左下角'];
+            else if (hasShang) bestMatch = POSITION_ZONES['上方'];
+            else if (hasXia) bestMatch = POSITION_ZONES['下方'];
+            else if (hasZuo) bestMatch = POSITION_ZONES['左边'];
+            else if (hasYou) bestMatch = POSITION_ZONES['右边'];
+        }
+        if (bestMatch) return { x: canvas.width * bestMatch.x, y: canvas.height * bestMatch.y, label: '' };
+        return null;
+    }
+
+    function parseShapeReference(text) {
+        const colorMatch = matchColor(text);
+        let shapeType = null;
+        for (const [name, type] of Object.entries(SHAPE_NAME_MAP)) {
+            if (text.includes(name)) { shapeType = type; break; }
+        }
+        if (!shapeType) return null;
+        return { color: colorMatch ? colorMatch.hex : null, colorName: colorMatch ? colorMatch.name : null, shapeType };
+    }
+
+    function parseScaleFactor(text) {
+        const numMatch = text.match(/(\d+(?:\.\d+)?)\s*倍/);
+        if (numMatch) return parseFloat(numMatch[1]);
+        if (text.includes('一半')) return 0.5;
+        if (text.includes('变大') || text.includes('放大')) return 1.5;
+        if (text.includes('缩小') || text.includes('变小')) return 0.67;
+        return null;
+    }
+
     // =========================== 鼠标事件（保留作为备用交互） ===========================
     canvas.addEventListener('mousedown', startDraw);
     canvas.addEventListener('mousemove', draw);
@@ -825,87 +1265,305 @@
     }
 
     // =========================== 指令解析模块 ===========================
+    // ================================================================
+    //  指令模式表（v1.2.0 扩展版）
+    //  优先级从高到低排列，复合指令在前，简单指令在后
+    //  新增 pattern.match(raw) 可选验证函数避免冲突
+    // ================================================================
     const COMMAND_PATTERNS = [
-        // ---- 帮助指令 ----
+        // ---- 1. 帮助指令 ----
         {
             keywords: ['帮助', 'help', '有什么指令', '能做什么', '怎么用', '说明'],
             handler: (m) => cmdHelp()
         },
 
-        // ---- 颜色指令 ----
+        // ---- 2. 复合填充："将[颜色]的[图形]填充为[颜色]" ----
         {
-            keywords: ['红色', '红的', '红颜色'],
-            handler: (m) => setColor('#e94560', '红色')
-        },
-        {
-            keywords: ['蓝色', '蓝的', '蓝颜色'],
-            handler: (m) => setColor('#3498db', '蓝色')
-        },
-        {
-            keywords: ['绿色', '绿的', '绿颜色'],
-            handler: (m) => setColor('#2ecc71', '绿色')
-        },
-        {
-            keywords: ['黄色', '黄的', '黄颜色'],
-            handler: (m) => setColor('#f1c40f', '黄色')
-        },
-        {
-            keywords: ['黑色', '黑的', '黑颜色'],
-            handler: (m) => setColor('#2c3e50', '黑色')
-        },
-        {
-            keywords: ['白色', '白的', '白颜色'],
-            handler: (m) => setColor('#ffffff', '白色')
-        },
-        {
-            keywords: ['紫色', '紫的', '紫颜色'],
-            handler: (m) => setColor('#9b59b6', '紫色')
-        },
-        {
-            keywords: ['橙色', '橘色', '橙的', '橘的', '橙颜色'],
-            handler: (m) => setColor('#e67e22', '橙色')
-        },
-        {
-            keywords: ['粉色', '粉红', '粉的', '粉颜色', '粉色'],
-            handler: (m) => setColor('#ff69b4', '粉色')
-        },
-        {
-            keywords: ['灰色', '灰的', '灰颜色'],
-            handler: (m) => setColor('#95a5a6', '灰色')
+            keywords: ['填充为'],
+            match: (raw) => raw.includes('的') && (raw.includes('将') || raw.includes('把')),
+            handler: (m) => {
+                const ref = parseShapeReference(m.raw);
+                const afterFill = m.raw.split('填充为')[1] || '';
+                const fillColor = matchColor(afterFill);
+                if (ref && fillColor) {
+                    const filter = {};
+                    if (ref.shapeType) filter.type = ref.shapeType;
+                    if (ref.color) filter.color = ref.color;
+                    const count = fillRegisteredShapes(filter, fillColor.hex);
+                    if (count > 0) {
+                        speakFeedback('已将' + count + '个图形填充为' + fillColor.name);
+                        addLogEntry('🎨', `填充 → 将${ref.colorName || ''}${ref.shapeType}填充为${fillColor.name} (${count}个)`, 'success');
+                    } else {
+                        speakFeedback('没有找到匹配的图形');
+                        addLogEntry('🎨', '填充失败：未找到匹配图形', 'warn');
+                    }
+                } else {
+                    speakFeedback('请说明要填充哪个颜色的哪种图形');
+                }
+            }
         },
 
-        // ---- 模式切换指令 ----
+        // ---- 3. 复合擦除："擦除[颜色]的[图形]" / "擦除全部" ----
+        {
+            keywords: ['擦除'],
+            match: (raw) => raw.includes('的') || raw.includes('全部') || raw.includes('所有'),
+            handler: (m) => {
+                if (m.raw.includes('全部') || m.raw.includes('所有')) {
+                    clearCanvas();
+                    speakFeedback('画布已全部擦除');
+                    addLogEntry('🗑', '擦除全部 → 画布已清空', 'success');
+                    return;
+                }
+                const ref = parseShapeReference(m.raw);
+                if (ref) {
+                    const filter = {};
+                    if (ref.shapeType) filter.type = ref.shapeType;
+                    if (ref.color) filter.color = ref.color;
+                    const count = removeShapes(filter);
+                    if (count > 0) {
+                        speakFeedback('已擦除' + count + '个图形');
+                        addLogEntry('🗑', `擦除 → ${ref.colorName || ''}${ref.shapeType} (${count}个)`, 'success');
+                    } else {
+                        speakFeedback('没有找到匹配的图形');
+                        addLogEntry('🗑', '擦除失败：未找到匹配图形', 'warn');
+                    }
+                }
+            }
+        },
+
+        // ---- 4. 复合缩放："将[颜色]的[图形]变大/缩小" ----
+        {
+            keywords: ['变大', '缩小', '放大', '变小'],
+            match: (raw) => raw.includes('的') && !raw.includes('当前'),
+            handler: (m) => {
+                const ref = parseShapeReference(m.raw);
+                const scale = parseScaleFactor(m.raw);
+                if (!ref || !scale) {
+                    speakFeedback('请说明要调整哪个图形的尺寸');
+                    return;
+                }
+                const filter = {};
+                if (ref.shapeType) filter.type = ref.shapeType;
+                if (ref.color) filter.color = ref.color;
+                const shapes = findShapes(filter);
+                for (const s of shapes) resizeShape(s.id, scale);
+                if (shapes.length > 0) {
+                    speakFeedback('已调整' + shapes.length + '个图形的尺寸');
+                    addLogEntry('📏', `缩放 → ${ref.shapeType} x${scale} (${shapes.length}个)`, 'success');
+                } else {
+                    speakFeedback('没有找到匹配的图形');
+                }
+            }
+        },
+
+        // ---- 5. 快速缩放："放大/缩小当前图形" / "放大2倍" ----
+        {
+            keywords: ['放大当前', '缩小当前', '当前图形变大', '当前图形变小',
+                       '当前图形放大', '当前图形缩小', '放大', '缩小'],
+            match: (raw) => !raw.includes('的') && !raw.includes('将'),
+            handler: (m) => {
+                if (STATE.lastDrawnShapeId === null) {
+                    speakFeedback('没有可调整的图形，请先绘制一个图形');
+                    addLogEntry('📏', '缩放失败：无当前图形', 'warn');
+                    return;
+                }
+                let scale = parseScaleFactor(m.raw);
+                if (!scale) scale = m.raw.includes('缩小') ? 0.67 : 1.5;
+                resizeShape(STATE.lastDrawnShapeId, scale);
+                speakFeedback('已调整当前图形尺寸');
+                addLogEntry('📏', `缩放 → 当前图形 x${scale}`, 'success');
+            }
+        },
+
+        // ---- 6. 方位绘图："在[方位]画[图形]" ----
+        {
+            keywords: ['在', '画'],
+            match: (raw) => {
+                const hasPos = parsePosition(raw) !== null;
+                const hasShape = raw.includes('圆') || raw.includes('线') || raw.includes('矩形')
+                    || raw.includes('正方形') || raw.includes('椭圆') || raw.includes('三角')
+                    || raw.includes('方形');
+                return hasPos && hasShape && (raw.includes('在') || raw.includes('于'));
+            },
+            handler: (m) => {
+                const pos = parsePosition(m.raw);
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+
+                if (m.raw.includes('三角')) {
+                    setDrawMode('freehand', '三角形');
+                    autoDrawTriangle(pos);
+                    speakFeedback('已绘制三角形');
+                } else if (m.raw.includes('椭圆')) {
+                    setDrawMode('circle', '椭圆');
+                    autoDrawEllipse(pos);
+                    speakFeedback('已绘制椭圆');
+                } else if (m.raw.includes('正方')) {
+                    setDrawMode('rectangle', '正方形');
+                    autoDrawSquare(pos);
+                    speakFeedback('已绘制正方形');
+                } else if (m.raw.includes('矩') || m.raw.includes('长方') || m.raw.includes('方')) {
+                    setDrawMode('rectangle', '矩形');
+                    autoDrawRectangle(pos);
+                    speakFeedback('已绘制矩形');
+                } else if (m.raw.includes('圆') || m.raw.includes('圈')) {
+                    setDrawMode('circle', '圆形');
+                    autoDrawCircle(pos);
+                    speakFeedback('已绘制圆形');
+                } else if (m.raw.includes('竖')) {
+                    setDrawMode('line', '竖线');
+                    autoDrawLine('vertical', pos);
+                    speakFeedback('已绘制竖线');
+                } else if (m.raw.includes('斜')) {
+                    setDrawMode('line', '斜线');
+                    autoDrawLine('diagonal', pos);
+                    speakFeedback('已绘制斜线');
+                } else if (m.raw.includes('横') || m.raw.includes('线')) {
+                    setDrawMode('line', '横线');
+                    autoDrawLine('horizontal', pos);
+                    speakFeedback('已绘制横线');
+                }
+                addLogEntry('📐', `方位绘图 → (${Math.round(pos.x)},${Math.round(pos.y)})`, 'success');
+            }
+        },
+
+        // ---- 7. 新图形自动绘制：正方形/椭圆/三角形 ----
+        {
+            keywords: ['正方形', '画正方形', '画个正方形', '画方块'],
+            match: (raw) => !raw.includes('矩形') && !raw.includes('长方'),
+            handler: (m) => {
+                setDrawMode('rectangle', '正方形');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                autoDrawSquare();
+                speakFeedback('已绘制正方形');
+                addLogEntry('📐', `自动绘制 → 正方形 (${STATE.currentColor})`, 'success');
+            }
+        },
+        {
+            keywords: ['椭圆', '画椭圆', '画个椭圆', '椭圆形'],
+            handler: (m) => {
+                setDrawMode('circle', '椭圆');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                autoDrawEllipse();
+                speakFeedback('已绘制椭圆');
+                addLogEntry('📐', `自动绘制 → 椭圆 (${STATE.currentColor})`, 'success');
+            }
+        },
+        {
+            keywords: ['三角形', '画三角形', '画个三角形', '三角'],
+            handler: (m) => {
+                setDrawMode('freehand', '三角形');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                autoDrawTriangle();
+                speakFeedback('已绘制三角形');
+                addLogEntry('📐', `自动绘制 → 三角形 (${STATE.currentColor})`, 'success');
+            }
+        },
+
+        // ---- 8. 原有自动绘图：直线/圆形/矩形 ----
+        {
+            keywords: [
+                '画一条直线', '画直线', '画一条横线', '画横线',
+                '画一条竖线', '画竖线', '画一条线', '画线',
+                '画个直线', '画个线', '画条直线', '画条线',
+                '画一条斜线', '画斜线', '横线', '竖线'
+            ],
+            handler: (m) => {
+                setDrawMode('line', '直线');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                let direction = 'horizontal';
+                if (m.raw.includes('竖')) direction = 'vertical';
+                else if (m.raw.includes('斜')) direction = 'diagonal';
+                autoDrawLine(direction);
+                speakFeedback('已绘制' + (direction === 'vertical' ? '竖线' : direction === 'diagonal' ? '斜线' : '横线'));
+                addLogEntry('📐', `自动绘制 → ${direction === 'vertical' ? '竖线' : direction === 'diagonal' ? '斜线' : '横线'} (${STATE.currentColor})`, 'success');
+            }
+        },
+        {
+            keywords: [
+                '画圆', '画个圆', '画一个圆', '画圆形', '画圆圈', '画圈',
+                '画一个圆形', '画一个圆圈', '画个圆圈', '画个圆形'
+            ],
+            handler: (m) => {
+                setDrawMode('circle', '圆形');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                autoDrawCircle();
+                speakFeedback('已绘制圆形');
+                addLogEntry('📐', `自动绘制 → 圆形 (${STATE.currentColor})`, 'success');
+            }
+        },
+        {
+            keywords: [
+                '画矩形', '画个矩形', '画一个矩形', '画长方形',
+                '画一个长方形', '画个长方形'
+            ],
+            handler: (m) => {
+                setDrawMode('rectangle', '矩形');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                autoDrawRectangle();
+                speakFeedback('已绘制矩形');
+                addLogEntry('📐', `自动绘制 → 矩形 (${STATE.currentColor})`, 'success');
+            }
+        },
+
+        // ---- 9. 模式切换兜底（含"画"字时自动绘图） ----
+        {
+            keywords: ['直线模式', '线段', '直线'],
+            handler: (m) => {
+                setDrawMode('line', '直线');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                if (m.raw.includes('画')) {
+                    let direction = 'horizontal';
+                    if (m.raw.includes('竖')) direction = 'vertical';
+                    else if (m.raw.includes('斜')) direction = 'diagonal';
+                    autoDrawLine(direction);
+                    speakFeedback('已绘制' + (direction === 'vertical' ? '竖线' : direction === 'diagonal' ? '斜线' : '横线'));
+                    addLogEntry('📐', `自动绘制 → ${direction === 'vertical' ? '竖线' : direction === 'diagonal' ? '斜线' : '横线'} (兜底)`, 'success');
+                }
+            }
+        },
+        {
+            keywords: ['圆形模式', '圆形', '圆圈', '圆'],
+            handler: (m) => {
+                setDrawMode('circle', '圆形');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                if (m.raw.includes('画')) {
+                    autoDrawCircle();
+                    speakFeedback('已绘制圆形');
+                    addLogEntry('📐', '自动绘制 → 圆形 (兜底)', 'success');
+                }
+            }
+        },
+        {
+            keywords: ['矩形模式', '矩形', '长方形'],
+            handler: (m) => {
+                setDrawMode('rectangle', '矩形');
+                const colorMatch = matchColor(m.raw);
+                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
+                if (m.raw.includes('画')) {
+                    autoDrawRectangle();
+                    speakFeedback('已绘制矩形');
+                    addLogEntry('📐', '自动绘制 → 矩形 (兜底)', 'success');
+                }
+            }
+        },
+
+        // ---- 10. 自由/填充/擦除模式（带match守卫避免复合指令冲突） ----
         {
             keywords: ['自由画', '自由绘制', '随便画', '画笔', '铅笔', '自由模式'],
             handler: (m) => setDrawMode('freehand', '自由绘制')
         },
         {
-            keywords: ['画直线', '直线模式', '线段', '画线'],
-            handler: (m) => {
-                setDrawMode('line', '直线');
-                // 同时处理颜色参数
-                const colorMatch = matchColor(m.raw);
-                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
-            }
-        },
-        {
-            keywords: ['画圆', '圆形', '圆圈', '画个圆'],
-            handler: (m) => {
-                setDrawMode('circle', '圆形');
-                const colorMatch = matchColor(m.raw);
-                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
-            }
-        },
-        {
-            keywords: ['画矩形', '长方形', '正方形', '矩形', '方块', '画方'],
-            handler: (m) => {
-                setDrawMode('rectangle', '矩形');
-                const colorMatch = matchColor(m.raw);
-                if (colorMatch) setColor(colorMatch.hex, colorMatch.name);
-            }
-        },
-        {
             keywords: ['填充', '填色', '填充模式', '油漆桶', '涂色'],
+            match: (raw) => !raw.includes('填充为') && !raw.includes('将') && !raw.includes('把'),
             handler: (m) => {
                 setDrawMode('fill', '填充');
                 const colorMatch = matchColor(m.raw);
@@ -914,10 +1572,49 @@
         },
         {
             keywords: ['擦除', '橡皮擦', '橡皮', '擦掉', '抹掉'],
+            match: (raw) => !raw.includes('的') && !raw.includes('全部') && !raw.includes('所有'),
             handler: (m) => setDrawMode('erase', '擦除')
         },
 
-        // ---- 样式指令 ----
+        // ---- 11. 亮度调整 ----
+        {
+            keywords: ['调亮', '亮一点', '更亮', '变亮'],
+            handler: (m) => {
+                const newHex = adjustBrightness(STATE.currentColor, 15);
+                const name = getColorName(newHex);
+                setColor(newHex, name || '亮色');
+                speakFeedback('颜色已调亮');
+                addLogEntry('🎨', `亮度 → +15 (${newHex})`, 'success');
+            }
+        },
+        {
+            keywords: ['调暗', '暗一点', '更暗', '变暗'],
+            handler: (m) => {
+                const newHex = adjustBrightness(STATE.currentColor, -15);
+                const name = getColorName(newHex);
+                setColor(newHex, name || '暗色');
+                speakFeedback('颜色已调暗');
+                addLogEntry('🎨', `亮度 → -15 (${newHex})`, 'success');
+            }
+        },
+
+        // ---- 12. 颜色指令 ----
+        { keywords: ['红色', '红的', '红颜色', '红'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['蓝色', '蓝的', '蓝颜色', '蓝'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['绿色', '绿的', '绿颜色', '绿'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['黄色', '黄的', '黄颜色', '黄'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['黑色', '黑的', '黑颜色', '黑'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['白色', '白的', '白颜色', '白'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['紫色', '紫的', '紫颜色', '紫'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['橙色', '橘色', '橙的', '橘的', '橙颜色', '橙'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['粉色', '粉红', '粉的', '粉颜色', '粉'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['灰色', '灰的', '灰颜色', '灰'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['青色', '青的', '青'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['棕色', '棕的', '褐色', '咖啡色', '棕', '褐'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['金色', '金的', '金'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+        { keywords: ['银色', '银的', '银'], handler: (m) => { const cm = matchColor(m.raw); if (cm) setColor(cm.hex, cm.name); } },
+
+        // ---- 13. 样式指令 ----
         {
             keywords: ['加粗', '粗线', '粗的', '变粗', '粗一点', '更粗'],
             handler: (m) => {
@@ -941,7 +1638,6 @@
         {
             keywords: ['线宽', '粗细', '设置粗细'],
             handler: (m) => {
-                // 尝试提取数字
                 const numMatch = m.raw.match(/(\d+)/);
                 if (numMatch) {
                     const w = Math.max(1, Math.min(20, parseInt(numMatch[1])));
@@ -954,7 +1650,7 @@
             }
         },
 
-        // ---- 操作指令 ----
+        // ---- 14. 操作指令 ----
         {
             keywords: ['撤销', '撤回', '后退', '返回上一步', '取消', 'undo'],
             handler: (m) => {
@@ -984,7 +1680,7 @@
             }
         },
 
-        // ---- 导出指令 ----
+        // ---- 15. 导出/停止 ----
         {
             keywords: ['导出', '保存', '下载', '保存图片', '导出图片'],
             handler: (m) => {
@@ -992,8 +1688,6 @@
                 speakFeedback('图片已导出');
             }
         },
-
-        // ---- 停止监听 ----
         {
             keywords: ['停止监听', '停止识别', '关闭语音', '休息', '暂停'],
             handler: (m) => {
@@ -1005,24 +1699,44 @@
 
     // 颜色匹配辅助函数
     const COLOR_MAP = [
-        { names: ['红色', '红的'], hex: '#e94560', label: '红色' },
-        { names: ['蓝色', '蓝的'], hex: '#3498db', label: '蓝色' },
-        { names: ['绿色', '绿的'], hex: '#2ecc71', label: '绿色' },
-        { names: ['黄色', '黄的'], hex: '#f1c40f', label: '黄色' },
-        { names: ['黑色', '黑的'], hex: '#2c3e50', label: '黑色' },
-        { names: ['白色', '白的'], hex: '#ffffff', label: '白色' },
-        { names: ['紫色', '紫的'], hex: '#9b59b6', label: '紫色' },
-        { names: ['橙色', '橘色', '橘的'], hex: '#e67e22', label: '橙色' },
-        { names: ['粉色', '粉红'], hex: '#ff69b4', label: '粉色' },
-        { names: ['灰色', '灰的'], hex: '#95a5a6', label: '灰色' },
+        { names: ['红色', '红的', '红'], hex: '#e94560', label: '红色' },
+        { names: ['蓝色', '蓝的', '蓝'], hex: '#3498db', label: '蓝色' },
+        { names: ['绿色', '绿的', '绿'], hex: '#2ecc71', label: '绿色' },
+        { names: ['黄色', '黄的', '黄'], hex: '#f1c40f', label: '黄色' },
+        { names: ['黑色', '黑的', '黑'], hex: '#2c3e50', label: '黑色' },
+        { names: ['白色', '白的', '白'], hex: '#ffffff', label: '白色' },
+        { names: ['紫色', '紫的', '紫'], hex: '#9b59b6', label: '紫色' },
+        { names: ['橙色', '橘色', '橘的', '橙'], hex: '#e67e22', label: '橙色' },
+        { names: ['粉色', '粉红', '粉'], hex: '#ff69b4', label: '粉色' },
+        { names: ['灰色', '灰的', '灰'], hex: '#95a5a6', label: '灰色' },
+        { names: ['青色', '青的', '青'], hex: '#00BCD4', label: '青色' },
+        { names: ['棕色', '棕的', '褐色', '咖啡色', '棕', '褐'], hex: '#795548', label: '棕色' },
+        { names: ['金色', '金的', '金'], hex: '#FFD700', label: '金色' },
+        { names: ['银色', '银的', '银'], hex: '#C0C0C0', label: '银色' },
     ];
 
     function matchColor(text) {
         for (const c of COLOR_MAP) {
             for (const name of c.names) {
-                if (text.includes(name)) {
-                    return { hex: c.hex, name: c.label };
+                const idx = text.indexOf(name);
+                if (idx === -1) continue;
+
+                let hex = c.hex;
+                let label = c.label;
+
+                // 检测前缀：深/暗 → 变暗，浅/淡/亮 → 变亮
+                if (idx > 0) {
+                    const prefix = text.charAt(idx - 1);
+                    if (prefix === '深' || prefix === '暗') {
+                        hex = darkenColor(c.hex, 20);
+                        label = '深' + label;
+                    } else if (prefix === '浅' || prefix === '淡' || prefix === '亮') {
+                        hex = lightenColor(c.hex, 20);
+                        label = '浅' + label;
+                    }
                 }
+
+                return { hex, name: label };
             }
         }
         return null;
@@ -1052,17 +1766,15 @@
 
     function cmdHelp() {
         const helpText = [
-            '可用指令：',
-            '画直线、画圆、画矩形 — 切换绘图模式',
-            '自由画 — 自由绘制模式',
-            '填充 — 点击区域填色',
-            '擦除 — 橡皮擦模式',
-            '红色、蓝色、绿色等 — 切换颜色',
-            '加粗、变细 — 调整线条',
-            '撤销 — 回退上一步',
-            '清空 — 清除画布',
-            '导出 — 保存图片',
-            '重置 — 恢复默认',
+            '基础绘图：画直线、横线、竖线、斜线、圆形、矩形、正方形、椭圆、三角形',
+            '方位绘图：在右上角画一个圆、在中间画一条横线',
+            '颜色设置：红色、蓝色、绿色、黄色、黑色、白色、紫色、橙色、粉色、灰色、青色、棕色、金色、银色',
+            '颜色调整：深红色、浅蓝色、调亮、调暗',
+            '线条样式：加粗、变细、线宽5',
+            '填充图形：将红色的圆形填充为蓝色',
+            '擦除图形：擦除蓝色的矩形、擦除全部',
+            '缩放图形：将红色的圆形放大、缩小当前图形、放大2倍',
+            '操作指令：撤销、清空、重置、导出',
             '说"帮助"可再次查看',
         ].join('；');
         speakFeedback(helpText);
@@ -1078,14 +1790,21 @@
 
         // 尝试匹配所有已知模式
         for (const pattern of COMMAND_PATTERNS) {
+            let kwMatched = null;
             for (const kw of pattern.keywords) {
                 if (raw.includes(kw)) {
-                    pattern.handler({ raw, alternatives, matchedKeyword: kw });
-                    matched = true;
+                    kwMatched = kw;
                     break;
                 }
             }
-            if (matched) break;
+            if (!kwMatched) continue;
+
+            // 附加 match 验证（v1.2.0），不通过则跳过此模式
+            if (pattern.match && !pattern.match(raw)) continue;
+
+            pattern.handler({ raw, alternatives, matchedKeyword: kwMatched });
+            matched = true;
+            break;
         }
 
         // 未匹配时的容错处理
@@ -1197,8 +1916,13 @@
             '#e94560': '红色', '#3498db': '蓝色', '#2ecc71': '绿色',
             '#f1c40f': '黄色', '#2c3e50': '黑色', '#ffffff': '白色',
             '#9b59b6': '紫色', '#e67e22': '橙色', '#ff69b4': '粉色', '#95a5a6': '灰色',
+            '#00BCD4': '青色', '#795548': '棕色', '#FFD700': '金色', '#C0C0C0': '银色',
         };
-        return map[hex] || hex;
+        if (map[hex]) return map[hex];
+        for (const c of COLOR_MAP) {
+            if (c.hex === hex) return c.label;
+        }
+        return hex;
     }
 
     // =========================== 颜色预设按钮 ===========================
@@ -1214,6 +1938,10 @@
             { hex: '#e67e22', name: '橙' },
             { hex: '#ff69b4', name: '粉' },
             { hex: '#95a5a6', name: '灰' },
+            { hex: '#00BCD4', name: '青' },
+            { hex: '#795548', name: '棕' },
+            { hex: '#FFD700', name: '金' },
+            { hex: '#C0C0C0', name: '银', border: '#999' },
         ];
 
         colors.forEach(c => {
@@ -1386,8 +2114,11 @@
     // 页面加载完成后初始化
     window.addEventListener('DOMContentLoaded', init);
 
-    console.log('🎙️ VoiceDraw AI v1.0.0 已加载');
-    console.log('📋 支持指令: 画直线 | 画圆 | 画矩形 | 自由画 | 填充 | 擦除 | 颜色切换 | 加粗/变细 | 撤销 | 清空 | 重置 | 导出');
+    console.log('🎙️ VoiceDraw AI v1.2.0 已加载 (复合指令版)');
+    console.log('📋 基础绘图: 直线/横线/竖线/斜线/圆形/矩形/正方形/椭圆/三角形');
+    console.log('📍 方位绘图: 在右上角画一个圆、在中间画一条横线');
+    console.log('🎨 复合指令: 将红色的圆形填充为蓝色 | 擦除蓝色的矩形 | 将图形放大/缩小');
+    console.log('🌈 颜色系统: 14种预设色 + 深/浅变体 + 亮度调整');
     console.log('🔮 AI文生图接口预留: STATE.aiEndpoint');
     console.log('💡 所有代码基于浏览器原生API实现，零外部依赖');
     </script>
