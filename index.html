@@ -308,7 +308,7 @@
             <span class="subtitle"> — 纯语音控制AI绘图工具</span>
         </div>
         <div style="font-size:0.8em;color:var(--text-secondary);">
-            v1.0.0 | 浏览器语音API驱动
+            v6.0.0 | Voice DataViz Tool
         </div>
     </header>
 
@@ -504,8 +504,7 @@
     }
 
     function updateStatus() {
-        document.getElementById('statusShapes').textContent =
-            Math.max(0, STATE.undoStack.length - 1);
+        var ss=document.getElementById('statusShapes'); if(ss)ss.textContent=STATE.drawnShapes.length>0?STATE.drawnShapes.length:Math.max(0,STATE.undoStack.length-1);
         document.getElementById('statusCmds').textContent = STATE.commandCount;
     }
 
@@ -1001,6 +1000,37 @@
                 speakFeedback('语音识别已暂停');
             }
         },
+
+        // 15.65 Chart Style Themes (v6.0)
+        { keywords: ['商务风','商务风格','商务主题'], handler: function(m){STATE.chartStyle='business';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到商务风');addLogEntry('Style','Business','success')}},
+        { keywords: ['科技风','科技风格','科技主题','霓虹风'], handler: function(m){STATE.chartStyle='tech';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到科技风');addLogEntry('Style','Tech','success')}},
+        { keywords: ['简约风','简约风格','极简风'], handler: function(m){STATE.chartStyle='minimal';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到简约风');addLogEntry('Style','Minimal','success')}},
+        { keywords: ['手绘风','手绘风格'], handler: function(m){STATE.chartStyle='handdrawn';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到手绘风');addLogEntry('Style','Hand-drawn','success')}},
+        // 15.67 Chart Type Switch (v6.0)
+        { keywords: ['换成柱状图','改成柱状图','切换柱状图'], handler: function(m){if(STATE.chartData.length>0){STATE.chartType='bar';drawChartWithConfig();speakFeedback('已换成柱状图')}}},
+        { keywords: ['换成饼图','改成饼图','切换饼图'], handler: function(m){if(STATE.chartData.length>0){STATE.chartType='pie';drawChartWithConfig();speakFeedback('已换成饼图')}}},
+        { keywords: ['换成折线图','改成折线图','切换折线图'], handler: function(m){if(STATE.chartData.length>0){STATE.chartType='line';drawChartWithConfig();speakFeedback('已换成折线图')}}},
+        // 15.68 Chart Data Modify (v6.0)
+        { keywords: ['第一个','第二个','第三个','第四个','第五个','第六个'], match: function(raw){return STATE.chartData.length>0&&(raw.indexOf('改为')>=0||raw.indexOf('改成')>=0)&&raw.indexOf('柱子')<0&&raw.indexOf('标题')<0&&raw.indexOf('标签')<0}, handler: function(m){chartEdit(m.raw)}},
+        // 15.69 Save Chart
+        { keywords: ['保存图表','保存图片','保存','导出图表','导出图片','导出'], handler: function(m){saveCanvas()}},
+
+        // 15.7 DataViz Wizard (v5.2) - step-by-step guided chart creation
+        { keywords: ['画柱状图','画条形图','柱状图','条形图'], handler: function(m){chartWizardStart('bar','要画几根柱子呢？')} },
+        { keywords: ['画饼图','饼图','画扇形图'], handler: function(m){chartWizardStart('pie','饼图分成几个部分呢？')} },
+        { keywords: ['画折线图','折线图','画趋势图'], handler: function(m){chartWizardStart('line','要画几个数据点呢？')} },
+        { keywords: ['画流程图','流程图'], handler: function(m){chartWizardStart('flow','流程图有几个节点呢？')} },
+        // Wizard number answers - captures individual numbers during wizard flow
+        { keywords: ['0','1','2','3','4','5','6','7','8','9','10','一百','两百','三百','四百','五百','一千','一万','不用','跳过','没有'], match: function(raw){return STATE.chartWizard.active}, handler: function(m){chartWizardAnswer(m.raw)} },
+        // Wizard label and title input
+        { keywords: ['添加标签','标签是','标签为'], match: function(raw){return STATE.chartWizard.active&&STATE.chartWizard.step===-2}, handler: function(m){chartWizardLabels(m.raw)} },
+        { keywords: ['设置标题','标题是','标题为'], match: function(raw){return STATE.chartWizard.active&&STATE.chartWizard.step===-3}, handler: function(m){chartWizardTitle(m.raw)} },
+
+        // 15.75 Chart Edit (v5.4) - edit chart elements after drawing
+        { keywords: ['第一个','第二个','第三个','第四个','第五个','第六个','第七个','第八个','第九个','第十个','第一根','第二根','第三根','第四根','第五根','标题','标签'], match: function(raw){return !STATE.chartWizard.active&&STATE.chartData.length>0}, handler: function(m){chartEdit(m.raw)} },
+
+        // 15.10 Save
+        { keywords: ['保存画作','保存图片','保存','导出画作','导出'], handler: function(m){saveCanvas()}},
     ];
 
     // 颜色匹配辅助函数
@@ -1070,14 +1100,14 @@
         showVoiceOverlay('💡 已说出可用指令列表', 'final');
     }
 
-    function parseAndExecute(text, alternatives = []) {
-        const raw = text.trim();
-        if (!raw) return;
-
-        let matched = false;
-
-        // 尝试匹配所有已知模式
-        for (const pattern of COMMAND_PATTERNS) {
+    function parseAndExecute(text, alternatives) {
+        var raw=text.trim();if(!raw)return;
+        if(STATE.chartWizard.active){chartWizardAnswer(raw);return}
+        // Chart edit interception: when chart exists and user references chart elements
+        if(!STATE.chartWizard.active&&STATE.chartData.length>0&&(raw.indexOf('标题')>=0||raw.indexOf('标签')>=0||(raw.indexOf('第')>=0&&(raw.indexOf('根')>=0||raw.indexOf('个')>=0))||raw.indexOf('柱子')>=0)){chartEdit(raw);return}
+        alternatives=alternatives||[];
+        var matched=false;
+        for(var i=0;i<COMMAND_PATTERNS.length;i++){var pattern=COMMAND_PATTERNS[i];
             for (const kw of pattern.keywords) {
                 if (raw.includes(kw)) {
                     pattern.handler({ raw, alternatives, matchedKeyword: kw });
@@ -1344,25 +1374,181 @@
     }
 
     // 注册AI指令（在指令解析中增加对AI指令的支持）
-    COMMAND_PATTERNS.push({
-        keywords: ['ai', 'AI', '人工智能', '文生图', '生成图片', 'AI画'],
-        handler: (m) => {
-            const prompt = m.raw
-                .replace(/ai/gi, '')
-                .replace(/人工智能/g, '')
-                .replace(/文生图/g, '')
-                .replace(/生成图片/g, '')
-                .replace(/画/g, '')
-                .replace(/一个/g, '')
-                .replace(/一张/g, '')
-                .trim();
-            if (prompt) {
-                aiGenerateImage(prompt);
-            } else {
-                speakFeedback('请描述你想让AI画什么，例如：AI画一只可爱的猫');
-            }
+    COMMAND_PATTERNS.push({keywords:["ai","AI","生成图片"],handler:function(m){speakFeedback("请使用数据可视化指令，如：画柱状图、画饼图、画折线图。支持商务风、科技风、简约风、手绘风四种风格");addLogEntry("AI","Use chart commands","success")}});
+
+
+    // ======================== Extended STATE fields ========================
+    STATE.drawnShapes=[]; STATE.nextShapeId=0; STATE.lastDrawnShapeId=null; STATE.baseSnapshot=null;
+    STATE.lineStyle='solid'; STATE.operationHistory=[]; STATE.maxHistory=50;
+    STATE.chartStyle='business';
+    STATE.chartType='bar'; STATE.chartData=[]; STATE.chartLabels=[]; STATE.chartTitle='';
+    STATE.chartWizard={active:false,type:'',step:0,count:0,values:[],labels:[],title:''};
+    STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#fff',titleSize:20,labelSize:14};
+
+    // ======================== Shape Registry ========================
+    function registerShape(type,params,color,fillColor,lineWidth){pushHistory('draw '+type);var s={id:STATE.nextShapeId++,type:type,color:color||STATE.currentColor,fillColor:fillColor||null,lineWidth:lineWidth||STATE.currentLineWidth,params:params};STATE.drawnShapes.push(s);STATE.lastDrawnShapeId=s.id;return s}
+    function redrawAllShapes(){if(STATE.baseSnapshot)ctx.putImageData(STATE.baseSnapshot,0,0);else{ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height)}for(var i=0;i<STATE.drawnShapes.length;i++){var s=STATE.drawnShapes[i];ctx.save();ctx.strokeStyle=s.color;ctx.lineWidth=s.lineWidth;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();switch(s.type){case'circle':ctx.arc(s.params.cx,s.params.cy,s.params.r,0,Math.PI*2);break;case'ellipse':ctx.ellipse(s.params.cx,s.params.cy,s.params.rx,s.params.ry,0,0,Math.PI*2);break;case'rectangle':ctx.rect(s.params.x,s.params.y,s.params.w,s.params.h);break;case'triangle':var hh=s.params.size*Math.sqrt(3)/2;ctx.moveTo(s.params.cx,s.params.cy-hh*2/3);ctx.lineTo(s.params.cx-s.params.size/2,s.params.cy+hh/3);ctx.lineTo(s.params.cx+s.params.size/2,s.params.cy+hh/3);ctx.closePath();break;case'line':ctx.moveTo(s.params.x1,s.params.y1);ctx.lineTo(s.params.x2,s.params.y2);break}if(s.fillColor){ctx.fillStyle=s.fillColor;ctx.fill()}ctx.stroke();ctx.restore()}}
+    function ensureBaseSnapshot(){if(STATE.drawnShapes.length===0&&!STATE.baseSnapshot)STATE.baseSnapshot=ctx.getImageData(0,0,canvas.width,canvas.height)}
+    function pushHistory(desc){var sc=STATE.drawnShapes.map(function(s){return{id:s.id,type:s.type,color:s.color,fillColor:s.fillColor,lineWidth:s.lineWidth,params:JSON.parse(JSON.stringify(s.params))}});var bc=null;if(STATE.baseSnapshot)bc=new ImageData(new Uint8ClampedArray(STATE.baseSnapshot.data),STATE.baseSnapshot.width,STATE.baseSnapshot.height);STATE.operationHistory.push({shapesSnapshot:sc,baseSnapshot:bc,lastDrawnShapeId:STATE.lastDrawnShapeId,nextShapeId:STATE.nextShapeId,desc:desc});if(STATE.operationHistory.length>STATE.maxHistory)STATE.operationHistory.shift()}
+
+    // ======================== Modified undo/clear ========================
+    var _origUndo=undo; var _origClear=clearCanvas;
+    undo=function(){if(STATE.operationHistory.length>0){var op=STATE.operationHistory.pop();STATE.drawnShapes=op.shapesSnapshot;STATE.baseSnapshot=op.baseSnapshot;STATE.lastDrawnShapeId=op.lastDrawnShapeId;STATE.nextShapeId=op.nextShapeId;if(STATE.drawnShapes.length===0){STATE.baseSnapshot=null;STATE.nextShapeId=0;STATE.lastDrawnShapeId=null}redrawAllShapes();saveSnapshot();updateStatus();return true}return _origUndo()}
+    clearCanvas=function(){pushHistory('clear');STATE.drawnShapes=[];STATE.nextShapeId=0;STATE.lastDrawnShapeId=null;STATE.baseSnapshot=null;ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);saveSnapshot();STATE.shapeCount=0;updateStatus()}
+    resetAll=function(){pushHistory('reset');STATE.drawnShapes=[];STATE.nextShapeId=0;STATE.lastDrawnShapeId=null;STATE.baseSnapshot=null;STATE.operationHistory=[];STATE.currentColor='#e94560';STATE.currentLineWidth=3;STATE.drawMode='freehand';ctx.strokeStyle=STATE.currentColor;ctx.fillStyle=STATE.currentColor;ctx.lineWidth=STATE.currentLineWidth;clearCanvas();updateColorUI();updateStyleUI()}
+
+    // ======================== AutoDraw functions (minimal - used by charts) ========================
+    var autoDrawState={stepIndex:0,getNextPosition:function(){var c=4,r=5;var col=this.stepIndex%c,row=Math.floor(this.stepIndex/c)%r;this.stepIndex++;return{x:canvas.width*(0.12+col*0.25),y:canvas.height*(0.12+row*0.2)}}};
+    function autoDrawCircle(pos,r){var p=pos||autoDrawState.getNextPosition();r=r||60;ensureBaseSnapshot();registerShape('circle',{cx:p.x,cy:p.y,r:r});redrawAllShapes();saveSnapshot();STATE.shapeCount++;updateStatus()}
+    function autoDrawEllipse(pos,rx,ry){var p=pos||autoDrawState.getNextPosition();rx=rx||80;ry=ry||50;ensureBaseSnapshot();registerShape('ellipse',{cx:p.x,cy:p.y,rx:rx,ry:ry});redrawAllShapes();saveSnapshot();STATE.shapeCount++;updateStatus()}
+    function autoDrawRectangle(pos,w,h){var p=pos||autoDrawState.getNextPosition();w=w||120;h=h||80;ensureBaseSnapshot();registerShape('rectangle',{x:p.x-w/2,y:p.y-h/2,w:w,h:h});redrawAllShapes();saveSnapshot();STATE.shapeCount++;updateStatus()}
+    function autoDrawTriangle(pos,sz){var p=pos||autoDrawState.getNextPosition();sz=sz||80;ensureBaseSnapshot();registerShape('triangle',{cx:p.x,cy:p.y,size:sz});redrawAllShapes();saveSnapshot();STATE.shapeCount++;updateStatus()}
+    function autoDrawLine(dir,pos){var p=pos||autoDrawState.getNextPosition();var l=120,x1,y1,x2,y2;if(dir==='vertical'){x1=x2=p.x;y1=p.y-l/2;y2=p.y+l/2}else{x1=p.x-l/2;y1=p.y;x2=p.x+l/2;y2=p.y}ensureBaseSnapshot();registerShape('line',{x1:x1,y1:y1,x2:x2,y2:y2,direction:dir||'horizontal',lineStyle:STATE.lineStyle});redrawAllShapes();saveSnapshot();STATE.shapeCount++;updateStatus()}
+
+    // ======================== Generative Art Engine ========================
+    // ======================== Chart Engine ========================
+    function parseNumbers(text){var nums=[],m=text.match(/\d+(\.\d+)?%?/g);if(m)for(var i=0;i<m.length;i++)nums.push(parseFloat(m[i].replace('%','')));return nums.length>0?nums:null}
+    function parseFlowLabels(text){var parts=text.split(/->|→|=>|-->/);if(parts.length>=2)return parts.map(function(p){return p.trim()}).filter(function(p){return p.length>0});return null}
+
+    // ======================== Chart Style Themes (v6.0) ========================
+    var CHART_STYLES={
+        business:{bg:'#f8f9fa',axis:'#546e7a',grid:'#cfd8dc',bars:['#546e7a','#78909c','#90a4ae','#b0bec5','#cfd8dc'],title:'#37474f',label:'#607d8b',line:'#455a64',pie:['#546e7a','#78909c','#90a4ae','#b0bec5','#cfd8dc']},
+        tech:{bg:'#0d1117',axis:'#58a6ff',grid:'#21262d',bars:['#58a6ff','#3fb950','#d29922','#f78166','#a371f7'],title:'#e6edf3',label:'#8b949e',line:'#58a6ff',pie:['#58a6ff','#3fb950','#d29922','#f78166','#a371f7']},
+        minimal:{bg:'#ffffff',axis:'#333333',grid:'#eeeeee',bars:['#333333','#555555','#777777','#999999','#bbbbbb'],title:'#111111',label:'#666666',line:'#333333',pie:['#333333','#555555','#777777','#999999','#bbbbbb']},
+        handdrawn:{bg:'#faf8f5',axis:'#5c4a3a',grid:'#e8e0d5',bars:['#8b7355','#a08060','#b8956e','#c4a882','#d4b896'],title:'#4a3828',label:'#7a6a55',line:'#8b7355',pie:['#8b7355','#a08060','#b8956e','#c4a882','#d4b896']}
+    };
+    function getStyleBg(){var s=CHART_STYLES[STATE.chartStyle]||CHART_STYLES.business;return s.bg}
+    function getStyleColors(){return CHART_STYLES[STATE.chartStyle]||CHART_STYLES.business}
+
+    function drawBarChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var lw=Math.min(w,h),pad=lw*0.08,chartW=w-pad*2,chartH=h-pad*3,bg=chartW*0.08,bw=(chartW-bg*(n+1))/n,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(w-pad*0.5,h-pad*1.8);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(pad,pad*0.5);ctx.stroke();for(var i=0;i<n;i++){var x=pad+bg+i*(bw+bg),bh=data[i]/maxV*chartH*0.85,y=h-pad*1.8-bh,col=getStyleColors().bars[i%5];ctx.fillStyle=col;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.strokeRect(x,y,bw,bh);ctx.fillStyle='#fff';ctx.font=Math.max(10,bw*0.35)+'px sans-serif';ctx.textAlign='center';ctx.fillText(data[i],x+bw/2,y-4);if(labels&&labels[i]){ctx.fillStyle=getStyleColors().label;ctx.font=Math.max(8,bw*0.25)+'px sans-serif';ctx.fillText(labels[i],x+bw/2,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(lw*0.03)+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}ctx.fillStyle='#888';ctx.font=Math.round(lw*0.018)+'px sans-serif';ctx.textAlign='right';for(var t=0;t<=4;t++){var tv=Math.round(maxV*t/4),ty=h-pad*1.8-tv/maxV*chartH*0.85;ctx.fillText(tv,pad-6,ty+4);ctx.beginPath();ctx.moveTo(pad-3,ty);ctx.lineTo(pad,ty);ctx.strokeStyle=getStyleColors().grid;ctx.stroke()}}
+    function drawPieChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var cx=w*0.38,cy=h*0.48,r=Math.min(w,h)*0.28,total=0;for(var i=0;i<n;i++)total+=data[i];if(total===0)return;var sa=-Math.PI/2;for(var i=0;i<n;i++){var slice=data[i]/total*Math.PI*2,col=getStyleColors().pie[i%5];ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,sa,sa+slice);ctx.closePath();ctx.fill();ctx.strokeStyle='#222';ctx.lineWidth=2;ctx.stroke();var ma=sa+slice/2,lx=cx+Math.cos(ma)*r*0.6,ly=cy+Math.sin(ma)*r*0.6;ctx.fillStyle='#fff';ctx.font='bold '+Math.round(r*0.2)+'px sans-serif';ctx.textAlign='center';ctx.fillText(Math.round(data[i]/total*100)+'%',lx,ly);sa+=slice}var lx=w*0.68,ly=cy-r;for(var i=0;i<n;i++){ctx.fillStyle='hsl('+(i*360/n)+',65%,55%)';ctx.fillRect(lx,ly+i*35,14,14);ctx.fillStyle='#ccc';ctx.font=Math.round(r*0.15)+'px sans-serif';ctx.textAlign='left';ctx.fillText((labels&&labels[i]?labels[i]:'项目'+(i+1))+' ('+data[i]+')',lx+18,ly+i*35+12)}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(r*0.22)+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,cx,cy-r-15)}}
+    function drawLineChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n<2)return;var pad=Math.min(w,h)*0.08,chartW=w-pad*2,chartH=h-pad*2.5,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(w-pad*0.5,h-pad*2);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(pad,pad);ctx.stroke();ctx.strokeStyle='#333';ctx.lineWidth=0.5;for(var i=1;i<=4;i++){var gy=h-pad*2-i*chartH/4;ctx.beginPath();ctx.moveTo(pad,gy);ctx.lineTo(w-pad*0.5,gy);ctx.stroke()}ctx.strokeStyle=getStyleColors().line;ctx.lineWidth=3;ctx.beginPath();var pts=[];for(var i=0;i<n;i++){var px=pad+i/(n-1)*chartW,py=h-pad*2-data[i]/maxV*chartH*0.85;pts.push({x:px,y:py});if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py)}ctx.stroke();ctx.fillStyle='rgba(79,195,247,0.15)';ctx.lineTo(pts[n-1].x,h-pad*2);ctx.lineTo(pts[0].x,h-pad*2);ctx.closePath();ctx.fill();for(var i=0;i<n;i++){ctx.fillStyle='#4fc3f7';ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,5,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#ccc';ctx.font=Math.round(pad*0.25)+'px sans-serif';ctx.textAlign='center';ctx.fillText(data[i],pts[i].x,pts[i].y-12);if(labels&&labels[i]){ctx.fillStyle='#888';ctx.fillText(labels[i],pts[i].x,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(pad*0.35)+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}}
+    function drawFlowChart(labels){var w=canvas.width,h=canvas.height,n=labels.length;if(n<2)return;var bw=Math.min(w*0.25,180),bh=50,gap=h/(n+1),cx=w/2;for(var i=0;i<n;i++){var y=(i+1)*gap,col='hsl('+(i*360/n)+',60%,45%)';ctx.fillStyle='rgba(30,30,50,0.85)';ctx.beginPath();ctx.moveTo(cx-bw/2+8,y-bh/2);ctx.lineTo(cx+bw/2-8,y-bh/2);ctx.quadraticCurveTo(cx+bw/2,y-bh/2,cx+bw/2,y-bh/2+8);ctx.lineTo(cx+bw/2,y+bh/2-8);ctx.quadraticCurveTo(cx+bw/2,y+bh/2,cx+bw/2-8,y+bh/2);ctx.lineTo(cx-bw/2+8,y+bh/2);ctx.quadraticCurveTo(cx-bw/2,y+bh/2,cx-bw/2,y+bh/2-8);ctx.lineTo(cx-bw/2,y-bh/2+8);ctx.quadraticCurveTo(cx-bw/2,y-bh/2,cx-bw/2+8,y-bh/2);ctx.closePath();ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 16px sans-serif';ctx.textAlign='center';ctx.fillText(labels[i],cx,y+6);if(i<n-1){var ny=(i+2)*gap-bh/2;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx,y+bh/2);ctx.lineTo(cx,ny);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,ny);ctx.lineTo(cx-8,ny-12);ctx.lineTo(cx+8,ny-12);ctx.closePath();ctx.fill()}}}
+    function drawChart(){var w=canvas.width,h=canvas.height;var bg=getStyleBg();ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);var d=STATE.chartData,l=STATE.chartLabels,t=STATE.chartTitle;switch(STATE.chartType){case'bar':drawBarChart(d,l,t);break;case'pie':drawPieChart(d,l,t);break;case'line':drawLineChart(d,l,t);break;case'flow':drawFlowChart(l.length>0?l:d.map(function(v){return''+v}));break}saveSnapshot();updateStatus()}
+    function saveCanvas(){var a=document.createElement('a');a.download='voicedraw-'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.png';a.href=canvas.toDataURL('image/png');a.click();speakFeedback('画作已保存');addLogEntry('Save','saved','success')}
+
+    // ======================== Chart Wizard v5.3 (robust step-by-step) ========================
+    function chartWizardStart(type,question){
+        STATE.chartWizard={active:true,type:type,step:0,count:0,values:[],labels:[],title:'',labelIdx:0};
+        STATE.chartType=type;speakFeedback('好的，'+question);addLogEntry('Wizard','Start '+type,'success')
+    }
+    // Parse number from answer, stripping units like "根","个","根柱子"
+    function extractNumber(raw){
+        var s=raw.replace(/根柱子|根柱|根|个柱子|个部分|个数据点|个节点|个/g,'').trim();
+        var n=parseInt(s.replace(/[^0-9]/g,''));if(!isNaN(n)&&n>0)return n;
+        n=parseChineseNumber(s);if(n>0)return n;
+        n=parseChineseNumber(raw);if(n>0)return n;
+        return null
+    }
+    // Detect yes/no intent
+    function isYes(raw){return raw.indexOf('需要')>=0||raw.indexOf('要')>=0||raw.indexOf('添加')>=0||raw.indexOf('好的')>=0||raw.indexOf('可以')>=0||raw.indexOf('行')>=0||raw.indexOf('是')>=0}
+    function isNo(raw){return raw.indexOf('不')>=0||raw.indexOf('别')>=0||raw.indexOf('算了')>=0||raw.indexOf('跳过')>=0}
+
+    function chartWizardAnswer(raw){
+        var w=STATE.chartWizard;if(!w.active)return;
+        // Step -1: asking yes/no for labels
+        if(w.step===-1){
+            if(isNo(raw)){w.step=-3;speakFeedback('好的，需要添加标题吗？说"要"或"不要"')}
+            else if(isYes(raw)){w.step=-21;speakFeedback('需要添加几个标签呢？')}
+            else{var n=extractNumber(raw);if(n){w.step=-21;w.labelCount=n;w.labels=[];w.labelIdx=0;speakFeedback('好的，共'+n+'个标签。第1个标签是什么？')}else{speakFeedback('请说"需要"或"不需要"')}}
+            return
         }
-    });
+        // Step -21: asking label count
+        if(w.step===-21){var n=extractNumber(raw);if(!n){speakFeedback('请说一个数字，比如3');return}w.labelCount=n;w.labels=[];w.labelIdx=0;w.step=-22;speakFeedback('好的，共'+n+'个标签。第1个标签是什么？');return}
+        // Step -22: asking each label
+        if(w.step===-22){w.labels.push(raw.replace(/[。，！？、,.!?]+$/g,'').trim());w.labelIdx++;if(w.labelIdx<w.labelCount){speakFeedback('好的，第'+(w.labelIdx+1)+'个标签呢？')}else{STATE.chartLabels=w.labels;drawChart();w.step=-3;speakFeedback('标签已更新！需要添加标题吗？说"要"或"不要"')}return}
+        // Step -3: asking yes/no for title
+        if(w.step===-3){if(isNo(raw)){chartWizardFinish()}else if(isYes(raw)){w.step=-4;speakFeedback('好的，标题是什么？')}else{w.step=-4;w.title=raw.replace(/[。，！？、,.!?]+$/g,'').trim();STATE.chartTitle=w.title;drawChart();chartWizardFinish()}return}
+        // Step -4: asking title content
+        if(w.step===-4){w.title=raw.trim();STATE.chartTitle=w.title;drawChart();chartWizardFinish();return}
+        // Step 0: asking count
+        if(w.step===0){var n=extractNumber(raw);if(!n||n<1){speakFeedback('请说一个数字，比如5');return}
+            w.count=n;w.step=1;w.currentIdx=0;
+            var u=w.type==='bar'?'根柱子':w.type==='pie'?'个部分':w.type==='line'?'个数据点':'个节点';
+            speakFeedback('好的，共'+n+u+'。第1'+(w.type==='flow'?'个节点叫什么名字':u.replace('个','')+'的数值是多少')+'？')}
+        // Step 1: asking values one by one
+        else if(w.step===1){
+            if(w.type==='flow'){var ct=raw.replace(/[。，！？、,.!?]+$/g,'').trim();w.labels.push(ct);w.values.push(ct)}
+            else{var n=extractNumber(raw);if(!n||n<1){speakFeedback('请说一个数字');return}w.values.push(n)}
+            w.currentIdx++;
+            if(w.currentIdx<w.count){speakFeedback('好的，第'+(w.currentIdx+1)+(w.type==='flow'?'个节点':'个')+'呢？')}
+            else{STATE.chartData=w.values;STATE.chartLabels=w.labels;STATE.chartTitle=w.title;drawChart();
+                if(w.type==='flow'){speakFeedback('流程图已绘制完成！')}else{var msg=w.type==='bar'?'柱子画好了':w.type==='pie'?'饼图画好了':'折线图画好了';w.step=-1;speakFeedback(msg+'！需要添加标签吗？说"需要"或"不需要"')}}
+        }
+    }
+    function chartWizardLabels(raw){chartWizardAnswer(raw)}
+    function chartWizardTitle(raw){chartWizardAnswer(raw)}
+    function chartWizardFinish(){STATE.chartWizard.active=false;STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#fff',titleSize:20,labelSize:14,barWidth:0};speakFeedback('图表已完成，需要修改吗？你可以说将第一根柱子改为金色、将标题改为红色、将标题内容改为销售额等，说不用继续');addLogEntry('Wizard','done','success')}
+    function cleanText(s){return s.replace(/[。，！？、,.!?]+$/g,'').replace(/\.$/,'').trim()}
+    // Chart element editing - uses matchColor for any color support
+    function chartEdit(raw){
+        var cfg=STATE.chartConfig;if(!cfg)return;
+        var cn={'一':0,'二':1,'三':2,'四':3,'五':4,'六':5,'七':6,'八':7,'九':8,'十':9,'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'10':9};
+        var idx=-1;for(var k in cn){if(raw.indexOf('第'+k)>=0||raw.indexOf(k+'个')>=0||raw.indexOf(k+'根')>=0){idx=cn[k];break}}
+        var cm=matchColor(raw); var targetCol=cm?cm.hex:null;
+        var isTitle=raw.indexOf('标题')>=0; var isLabel=raw.indexOf('标签')>=0; var isBar=raw.indexOf('柱子')>=0;
+        var newText=null;if(raw.indexOf('改为')>=0||raw.indexOf('改成')>=0){var parts=raw.split(/改为|改成/);if(parts.length>1)newText=cleanText(parts[1])}
+        if(isTitle){
+            if(newText){STATE.chartTitle=cleanText(newText);speakFeedback('标题已改为 '+STATE.chartTitle)}
+            if(targetCol){cfg.titleColor=targetCol;speakFeedback('标题颜色已更新')}
+            if(raw.indexOf('放大')>=0){cfg.titleSize=Math.min(40,cfg.titleSize+4);speakFeedback('标题已放大')}
+            if(raw.indexOf('缩小')>=0){cfg.titleSize=Math.max(10,cfg.titleSize-4);speakFeedback('标题已缩小')}
+            if(raw.indexOf('加粗')>=0){cfg.titleBold=!cfg.titleBold;speakFeedback('标题已'+(cfg.titleBold?'加粗':'取消加粗'))}
+        }else if(isLabel){
+            if(newText&&idx>=0&&idx<STATE.chartLabels.length){STATE.chartLabels[idx]=cleanText(newText);speakFeedback('标签已改为 '+STATE.chartLabels[idx])}
+            if(targetCol){if(!cfg.labelColors)cfg.labelColors=[];if(idx>=0)cfg.labelColors[idx]=targetCol;else for(var i=0;i<STATE.chartLabels.length;i++)cfg.labelColors[i]=targetCol;speakFeedback('标签颜色已更新')}
+            if(raw.indexOf('放大')>=0){cfg.labelSize=Math.min(24,(cfg.labelSize||14)+2);speakFeedback('标签已放大')}
+            if(raw.indexOf('缩小')>=0){cfg.labelSize=Math.max(8,(cfg.labelSize||14)-2);speakFeedback('标签已缩小')}
+            if(raw.indexOf('加粗')>=0){cfg.labelBold=!cfg.labelBold;speakFeedback('标签已'+(cfg.labelBold?'加粗':'取消加粗'))}
+        }else if(isBar){
+            if(targetCol){if(!cfg.barColors)cfg.barColors=[];if(idx>=0&&idx<STATE.chartData.length)cfg.barColors[idx]=targetCol;else for(var i=0;i<STATE.chartData.length;i++)cfg.barColors[i]=targetCol;speakFeedback(idx>=0?'第'+(idx+1)+'根柱子已改为新颜色':'所有柱子已改为新颜色')}
+            if(raw.indexOf('加粗')>=0){cfg.barWidth=(cfg.barWidth||0)+0.3;speakFeedback('柱子已加粗')}
+            if(raw.indexOf('变细')>=0||raw.indexOf('变窄')>=0){cfg.barWidth=Math.max(-0.6,(cfg.barWidth||0)-0.3);speakFeedback('柱子已变细')}
+        }
+        drawChartWithConfig();
+    }
+    // Draw chart using chartConfig for per-element styling
+    function drawChartWithConfig(){
+        var cfg=STATE.chartConfig,w=canvas.width,h=canvas.height;
+        ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,w,h);var d=STATE.chartData,l=STATE.chartLabels,t=STATE.chartTitle;
+        switch(STATE.chartType){
+            case'bar':drawBarChartCfg(d,l,t,cfg);break;
+            case'pie':drawPieChartCfg(d,l,t,cfg);break;
+            default:drawChart();break;
+        }
+        saveSnapshot();updateStatus();
+    }
+    function drawBarChartCfg(data,labels,title,cfg){
+        var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var lw=Math.min(w,h),pad=lw*0.08;
+        // Dynamic title spacing: larger title = more top margin
+        var ts=cfg.titleSize||20; var titleTop=Math.max(pad*0.6, pad*0.35+ts*1.0);
+        // Label spacing below X-axis
+        var ls=cfg.labelSize||14; var labelBot=Math.max(pad*0.3, ls+10);
+        // Chart drawing area
+        var chartTop=titleTop+pad*0.3, chartBot=h-pad*1.8-labelBot, chartH=chartBot-chartTop;
+        var chartW=w-pad*2, bg=chartW*0.08;
+        var defBw=(chartW-bg*(n+1))/n, bwExtra=(cfg.barWidth||0)*defBw, bw=Math.max(4,defBw+bwExtra);
+        var maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;
+        // Axes
+        var axisY=chartBot; ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;
+        ctx.beginPath();ctx.moveTo(pad,axisY);ctx.lineTo(w-pad*0.5,axisY);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(pad,axisY);ctx.lineTo(pad,chartTop);ctx.stroke();
+        // Bars
+        for(var i=0;i<n;i++){var x=pad+bg+i*(defBw+bg),bh=data[i]/maxV*chartH*0.92,y=axisY-bh;var col=(cfg.barColors&&cfg.barColors[i])?cfg.barColors[i]:getStyleColors().bars[i%5];ctx.fillStyle=col;ctx.fillRect(x-bwExtra/2,y,bw,bh);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.strokeRect(x-bwExtra/2,y,bw,bh);
+            ctx.fillStyle='#fff';ctx.font=Math.max(10,bw*0.35)+'px sans-serif';ctx.textAlign='center';ctx.fillText(data[i],x+bw/2-bwExtra/2,y-4);
+            if(labels&&labels[i]){var lc=(cfg.labelColors&&cfg.labelColors[i])?cfg.labelColors[i]:'#aaa';ctx.fillStyle=lc;ctx.font=(cfg.labelBold?'bold ':'')+ls+'px sans-serif';ctx.fillText(labels[i],x+bw/2-bwExtra/2,axisY+ls+4)}}
+        // Title
+        if(title){ctx.fillStyle=cfg.titleColor||'#fff';ctx.font=(cfg.titleBold?'bold ':'')+ts+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,w/2,titleTop-ts*0.3)}
+        // Y-axis ticks
+        ctx.fillStyle='#888';ctx.font=Math.round(lw*0.018)+'px sans-serif';ctx.textAlign='right';
+        for(var t=0;t<=4;t++){var tv=Math.round(maxV*t/4),ty=axisY-tv/maxV*chartH*0.92;ctx.fillText(tv,pad-6,ty+4);ctx.beginPath();ctx.moveTo(pad-3,ty);ctx.lineTo(pad,ty);ctx.strokeStyle=getStyleColors().grid;ctx.stroke()}
+    }
+    function drawPieChartCfg(data,labels,title,cfg){drawPieChart(data,labels,title)}
+    function parseChineseNumber(s){var cn={一:1,二:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9,十:10,百:100,千:1000,万:10000,零:0,两:2};var r=0,cur=0,lastU=1;for(var i=0;i<s.length;i++){var c=s.charAt(i);var v=cn[c];if(v===undefined)continue;if(v>=10){if(cur===0)cur=1;r+=cur*v;cur=0;lastU=v}else{cur=v}}if(cur>0){if(lastU>=100)cur*=lastU/10;r+=cur}return r>0?r:null}
+
+    // ======================== Insert Commands BEFORE Block 16 ========================
+    // We need to modify COMMAND_PATTERNS - add new blocks before Block 16
+    // This is done by finding the closing ] of COMMAND_PATTERNS and inserting before it
 
     // =========================== 窗口大小调整 ===========================
     window.addEventListener('resize', () => {
@@ -1386,7 +1572,7 @@
     // 页面加载完成后初始化
     window.addEventListener('DOMContentLoaded', init);
 
-    console.log('🎙️ VoiceDraw AI v1.0.0 已加载');
+    console.log('🎙️ VoiceDraw AI v6.0.0 | Voice DataViz Tool + Charts');
     console.log('📋 支持指令: 画直线 | 画圆 | 画矩形 | 自由画 | 填充 | 擦除 | 颜色切换 | 加粗/变细 | 撤销 | 清空 | 重置 | 导出');
     console.log('🔮 AI文生图接口预留: STATE.aiEndpoint');
     console.log('💡 所有代码基于浏览器原生API实现，零外部依赖');
