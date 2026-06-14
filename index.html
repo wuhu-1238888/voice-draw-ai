@@ -457,6 +457,7 @@
         ctx.lineWidth = STATE.currentLineWidth;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
+        ctx.imageSmoothingEnabled = true;
 
         // 保存初始状态
         saveSnapshot();
@@ -987,8 +988,7 @@
         {
             keywords: ['导出', '保存', '下载', '保存图片', '导出图片'],
             handler: (m) => {
-                exportCanvas();
-                speakFeedback('图片已导出');
+                saveCanvas();
             }
         },
 
@@ -1002,10 +1002,10 @@
         },
 
         // 15.65 Chart Style Themes (v6.0)
-        { keywords: ['商务风','商务风格','商务主题'], handler: function(m){STATE.chartStyle='business';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到商务风');addLogEntry('Style','Business','success')}},
-        { keywords: ['科技风','科技风格','科技主题','霓虹风'], handler: function(m){STATE.chartStyle='tech';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到科技风');addLogEntry('Style','Tech','success')}},
-        { keywords: ['简约风','简约风格','极简风'], handler: function(m){STATE.chartStyle='minimal';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到简约风');addLogEntry('Style','Minimal','success')}},
-        { keywords: ['手绘风','手绘风格'], handler: function(m){STATE.chartStyle='handdrawn';if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到手绘风');addLogEntry('Style','Hand-drawn','success')}},
+        { keywords: ['暖色风','暖色调','暖色主题','温暖风'], handler: function(m){var bw=STATE.chartConfig.barWidth||0;STATE.chartStyle='warm';STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:bw};if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到暖色风');addLogEntry('Style','Warm','success')}},
+        { keywords: ['商务风','商务风格','商务主题'], handler: function(m){var bw=STATE.chartConfig.barWidth||0;STATE.chartStyle='business';STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:bw};if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到商务风');addLogEntry('Style','Business','success')}},
+        { keywords: ['科技风','科技风格','科技主题','霓虹风'], handler: function(m){var bw=STATE.chartConfig.barWidth||0;STATE.chartStyle='tech';STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#e6edf3',titleSize:16,labelSize:16,barWidth:bw};if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到科技风');addLogEntry('Style','Tech','success')}},
+        { keywords: ['简约风','简约风格','极简风'], handler: function(m){var bw=STATE.chartConfig.barWidth||0;STATE.chartStyle='minimal';STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:bw};if(STATE.chartData.length>0)drawChartWithConfig();speakFeedback('已切换到简约风');addLogEntry('Style','Minimal','success')}},
         // 15.67 Chart Type Switch (v6.0)
         { keywords: ['换成柱状图','改成柱状图','切换柱状图'], handler: function(m){if(STATE.chartData.length>0){STATE.chartType='bar';drawChartWithConfig();speakFeedback('已换成柱状图')}}},
         { keywords: ['换成饼图','改成饼图','切换饼图'], handler: function(m){if(STATE.chartData.length>0){STATE.chartType='pie';drawChartWithConfig();speakFeedback('已换成饼图')}}},
@@ -1013,7 +1013,7 @@
         // 15.68 Chart Data Modify (v6.0)
         { keywords: ['第一个','第二个','第三个','第四个','第五个','第六个'], match: function(raw){return STATE.chartData.length>0&&(raw.indexOf('改为')>=0||raw.indexOf('改成')>=0)&&raw.indexOf('柱子')<0&&raw.indexOf('标题')<0&&raw.indexOf('标签')<0}, handler: function(m){chartEdit(m.raw)}},
         // 15.69 Save Chart
-        { keywords: ['保存图表','保存图片','保存','导出图表','导出图片','导出'], handler: function(m){saveCanvas()}},
+        { keywords: ['保存图表','保存图片','保存','导出图表','导出图片','导出','导出白底','导出白色'], handler: function(m){saveCanvas()}},
 
         // 15.7 DataViz Wizard (v5.2) - step-by-step guided chart creation
         { keywords: ['画柱状图','画条形图','柱状图','条形图'], handler: function(m){chartWizardStart('bar','要画几根柱子呢？')} },
@@ -1029,8 +1029,7 @@
         // 15.75 Chart Edit (v5.4) - edit chart elements after drawing
         { keywords: ['第一个','第二个','第三个','第四个','第五个','第六个','第七个','第八个','第九个','第十个','第一根','第二根','第三根','第四根','第五根','标题','标签'], match: function(raw){return !STATE.chartWizard.active&&STATE.chartData.length>0}, handler: function(m){chartEdit(m.raw)} },
 
-        // 15.10 Save
-        { keywords: ['保存画作','保存图片','保存','导出画作','导出'], handler: function(m){saveCanvas()}},
+        // 15.10 Save (replaced by 15.69 block above)
     ];
 
     // 颜色匹配辅助函数
@@ -1103,7 +1102,9 @@
     function parseAndExecute(text, alternatives) {
         var raw=text.trim();if(!raw)return;
         if(STATE.chartWizard.active){chartWizardAnswer(raw);return}
-        // Chart edit interception: when chart exists and user references chart elements
+        if(STATE.exportDone){STATE.exportDone=false;if(raw.indexOf('继续')>=0||raw.indexOf('画图')>=0){clearCanvas();speakFeedback('画布已清空，请说出新的绘图指令');showHint('可用指令:',SHOW_HINTS);return}else{speakFeedback('已结束，感谢使用VoiceDraw AI');stopListening();return}}
+        // Chart edit interception: handle "需要" response
+        if(!STATE.chartWizard.active&&STATE.chartData.length>0){var t=raw.replace(/[。，！？、,.!? ]/g,'');if(t==='需要'||t==='要'||t==='好的'||t==='可以'||t==='行'||t==='是的'){speakFeedback('好的，请根据左侧显示的修改指令进行修改');if(STATE.chartType==='bar')showHint('柱状图修改指令:',EDIT_HINTS);return}}
         if(!STATE.chartWizard.active&&STATE.chartData.length>0&&(raw.indexOf('标题')>=0||raw.indexOf('标签')>=0||(raw.indexOf('第')>=0&&(raw.indexOf('根')>=0||raw.indexOf('个')>=0))||raw.indexOf('柱子')>=0)){chartEdit(raw);return}
         alternatives=alternatives||[];
         var matched=false;
@@ -1269,6 +1270,17 @@
         }
     }
 
+    // ---- Top hint bar (collapsible, zero layout impact) ----
+    var SHOW_HINTS=['画柱状图','画饼图','画折线图','画流程图','撤销','清空','重置'];
+    var EDIT_HINTS=['将第N根柱子改色','柱子加粗/变细','标题改为/放大/缩小/加粗','将第N个标签改为','标签放大/缩小/加粗','标题/标签改色','暖色风','商务风','科技风','简约风','撤销','导出'];
+    function showHint(title,items){
+        var el=document.getElementById('hintBar');
+        if(!el){el=document.createElement('div');el.id='hintBar';el.style.cssText='padding:6px 10px;font-size:0.72em;line-height:1.5;color:var(--text-secondary);background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border);cursor:pointer';el.onclick=function(){var c=this.querySelector('div:last-child');if(c)c.style.display=c.style.display==='none'?'block':'none'};var sidebar=document.querySelector('.sidebar');sidebar.insertBefore(el,sidebar.firstChild)}
+        var tags=items.map(function(s){return '<span style=\"background:rgba(255,255,255,0.06);padding:0 5px;margin:1px 2px;border-radius:3px;display:block\">'+s+'</span>'}).join('');
+        el.innerHTML='<b>'+title+'</b> <span style=\"font-size:0.9em\">(点击折叠)</span><div style=\"margin-top:3px\">'+tags+'</div>'
+    }
+    function hideHint(){var el=document.getElementById('hintBar');if(el)el.remove()}
+
     function startListening() {
         if (!STATE.recognition) {
             STATE.recognition = initSpeechRecognition();
@@ -1278,7 +1290,7 @@
         micBtn.dataset.autoRestart = 'true';
         try {
             STATE.recognition.start();
-            speakFeedback('语音识别已启动，请说出绘图指令');
+            speakFeedback('语音识别已启动，请说出绘图指令');showHint('可用指令:',SHOW_HINTS);
         } catch (e) {
             // 可能已经在运行中
             console.warn('启动语音识别:', e);
@@ -1295,7 +1307,7 @@
         micBtn.textContent = '🎙️';
         micDot.classList.remove('active');
         micLabel.textContent = '点击麦克风开始';
-        document.getElementById('statusRecog').textContent = '待机';
+        document.getElementById('statusRecog').textContent = '待机';hideHint();
         addLogEntry('🔇', '语音识别已暂停', 'warn');
     }
 
@@ -1380,10 +1392,10 @@
     // ======================== Extended STATE fields ========================
     STATE.drawnShapes=[]; STATE.nextShapeId=0; STATE.lastDrawnShapeId=null; STATE.baseSnapshot=null;
     STATE.lineStyle='solid'; STATE.operationHistory=[]; STATE.maxHistory=50;
-    STATE.chartStyle='business';
+    STATE.chartStyle='warm';
     STATE.chartType='bar'; STATE.chartData=[]; STATE.chartLabels=[]; STATE.chartTitle='';
     STATE.chartWizard={active:false,type:'',step:0,count:0,values:[],labels:[],title:''};
-    STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#fff',titleSize:20,labelSize:14};
+    STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:-0.6};
 
     // ======================== Shape Registry ========================
     function registerShape(type,params,color,fillColor,lineWidth){pushHistory('draw '+type);var s={id:STATE.nextShapeId++,type:type,color:color||STATE.currentColor,fillColor:fillColor||null,lineWidth:lineWidth||STATE.currentLineWidth,params:params};STATE.drawnShapes.push(s);STATE.lastDrawnShapeId=s.id;return s}
@@ -1412,20 +1424,36 @@
 
     // ======================== Chart Style Themes (v6.0) ========================
     var CHART_STYLES={
-        business:{bg:'#f8f9fa',axis:'#546e7a',grid:'#cfd8dc',bars:['#546e7a','#78909c','#90a4ae','#b0bec5','#cfd8dc'],title:'#37474f',label:'#607d8b',line:'#455a64',pie:['#546e7a','#78909c','#90a4ae','#b0bec5','#cfd8dc']},
+        warm:{bg:'#ffffff',axis:'#bdbdbd',grid:'#f5f5f5',bars:['#f4a460','#ff9f43','#ffb347','#ffcc80','#ffe0b2'],title:'#2c3e50',label:'#7f8c8d',line:'#f4a460',pie:['#f4a460','#ff9f43','#ffb347','#ffcc80','#ffe0b2']},
+        business:{bg:'#ffffff',axis:'#b0bec5',grid:'#eceff1',bars:['#4a90d9','#5b9ed4','#6db0e0','#82c4ed','#a0d4f5'],title:'#1a3a5c',label:'#607d8b',line:'#4a90d9',pie:['#4a90d9','#5b9ed4','#6db0e0','#82c4ed','#a0d4f5']},
         tech:{bg:'#0d1117',axis:'#58a6ff',grid:'#21262d',bars:['#58a6ff','#3fb950','#d29922','#f78166','#a371f7'],title:'#e6edf3',label:'#8b949e',line:'#58a6ff',pie:['#58a6ff','#3fb950','#d29922','#f78166','#a371f7']},
-        minimal:{bg:'#ffffff',axis:'#333333',grid:'#eeeeee',bars:['#333333','#555555','#777777','#999999','#bbbbbb'],title:'#111111',label:'#666666',line:'#333333',pie:['#333333','#555555','#777777','#999999','#bbbbbb']},
-        handdrawn:{bg:'#faf8f5',axis:'#5c4a3a',grid:'#e8e0d5',bars:['#8b7355','#a08060','#b8956e','#c4a882','#d4b896'],title:'#4a3828',label:'#7a6a55',line:'#8b7355',pie:['#8b7355','#a08060','#b8956e','#c4a882','#d4b896']}
+        minimal:{bg:'#ffffff',axis:'#37474f',grid:'#eceff1',bars:['#37474f','#546e7a','#607d8b','#78909c','#90a4ae'],title:'#1a2327',label:'#455a64',line:'#37474f',pie:['#37474f','#546e7a','#607d8b','#78909c','#90a4ae']},
     };
     function getStyleBg(){var s=CHART_STYLES[STATE.chartStyle]||CHART_STYLES.business;return s.bg}
     function getStyleColors(){return CHART_STYLES[STATE.chartStyle]||CHART_STYLES.business}
 
-    function drawBarChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var lw=Math.min(w,h),pad=lw*0.08,chartW=w-pad*2,chartH=h-pad*3,bg=chartW*0.08,bw=(chartW-bg*(n+1))/n,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(w-pad*0.5,h-pad*1.8);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(pad,pad*0.5);ctx.stroke();for(var i=0;i<n;i++){var x=pad+bg+i*(bw+bg),bh=data[i]/maxV*chartH*0.85,y=h-pad*1.8-bh,col=getStyleColors().bars[i%5];ctx.fillStyle=col;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.strokeRect(x,y,bw,bh);ctx.fillStyle='#fff';ctx.font=Math.max(10,bw*0.35)+'px sans-serif';ctx.textAlign='center';ctx.fillText(data[i],x+bw/2,y-4);if(labels&&labels[i]){ctx.fillStyle=getStyleColors().label;ctx.font=Math.max(8,bw*0.25)+'px sans-serif';ctx.fillText(labels[i],x+bw/2,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(lw*0.03)+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}ctx.fillStyle='#888';ctx.font=Math.round(lw*0.018)+'px sans-serif';ctx.textAlign='right';for(var t=0;t<=4;t++){var tv=Math.round(maxV*t/4),ty=h-pad*1.8-tv/maxV*chartH*0.85;ctx.fillText(tv,pad-6,ty+4);ctx.beginPath();ctx.moveTo(pad-3,ty);ctx.lineTo(pad,ty);ctx.strokeStyle=getStyleColors().grid;ctx.stroke()}}
-    function drawPieChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var cx=w*0.38,cy=h*0.48,r=Math.min(w,h)*0.28,total=0;for(var i=0;i<n;i++)total+=data[i];if(total===0)return;var sa=-Math.PI/2;for(var i=0;i<n;i++){var slice=data[i]/total*Math.PI*2,col=getStyleColors().pie[i%5];ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,sa,sa+slice);ctx.closePath();ctx.fill();ctx.strokeStyle='#222';ctx.lineWidth=2;ctx.stroke();var ma=sa+slice/2,lx=cx+Math.cos(ma)*r*0.6,ly=cy+Math.sin(ma)*r*0.6;ctx.fillStyle='#fff';ctx.font='bold '+Math.round(r*0.2)+'px sans-serif';ctx.textAlign='center';ctx.fillText(Math.round(data[i]/total*100)+'%',lx,ly);sa+=slice}var lx=w*0.68,ly=cy-r;for(var i=0;i<n;i++){ctx.fillStyle='hsl('+(i*360/n)+',65%,55%)';ctx.fillRect(lx,ly+i*35,14,14);ctx.fillStyle='#ccc';ctx.font=Math.round(r*0.15)+'px sans-serif';ctx.textAlign='left';ctx.fillText((labels&&labels[i]?labels[i]:'项目'+(i+1))+' ('+data[i]+')',lx+18,ly+i*35+12)}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(r*0.22)+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,cx,cy-r-15)}}
-    function drawLineChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n<2)return;var pad=Math.min(w,h)*0.08,chartW=w-pad*2,chartH=h-pad*2.5,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(w-pad*0.5,h-pad*2);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(pad,pad);ctx.stroke();ctx.strokeStyle='#333';ctx.lineWidth=0.5;for(var i=1;i<=4;i++){var gy=h-pad*2-i*chartH/4;ctx.beginPath();ctx.moveTo(pad,gy);ctx.lineTo(w-pad*0.5,gy);ctx.stroke()}ctx.strokeStyle=getStyleColors().line;ctx.lineWidth=3;ctx.beginPath();var pts=[];for(var i=0;i<n;i++){var px=pad+i/(n-1)*chartW,py=h-pad*2-data[i]/maxV*chartH*0.85;pts.push({x:px,y:py});if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py)}ctx.stroke();ctx.fillStyle='rgba(79,195,247,0.15)';ctx.lineTo(pts[n-1].x,h-pad*2);ctx.lineTo(pts[0].x,h-pad*2);ctx.closePath();ctx.fill();for(var i=0;i<n;i++){ctx.fillStyle='#4fc3f7';ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,5,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#ccc';ctx.font=Math.round(pad*0.25)+'px sans-serif';ctx.textAlign='center';ctx.fillText(data[i],pts[i].x,pts[i].y-12);if(labels&&labels[i]){ctx.fillStyle='#888';ctx.fillText(labels[i],pts[i].x,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(pad*0.35)+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}}
-    function drawFlowChart(labels){var w=canvas.width,h=canvas.height,n=labels.length;if(n<2)return;var bw=Math.min(w*0.25,180),bh=50,gap=h/(n+1),cx=w/2;for(var i=0;i<n;i++){var y=(i+1)*gap,col='hsl('+(i*360/n)+',60%,45%)';ctx.fillStyle='rgba(30,30,50,0.85)';ctx.beginPath();ctx.moveTo(cx-bw/2+8,y-bh/2);ctx.lineTo(cx+bw/2-8,y-bh/2);ctx.quadraticCurveTo(cx+bw/2,y-bh/2,cx+bw/2,y-bh/2+8);ctx.lineTo(cx+bw/2,y+bh/2-8);ctx.quadraticCurveTo(cx+bw/2,y+bh/2,cx+bw/2-8,y+bh/2);ctx.lineTo(cx-bw/2+8,y+bh/2);ctx.quadraticCurveTo(cx-bw/2,y+bh/2,cx-bw/2,y+bh/2-8);ctx.lineTo(cx-bw/2,y-bh/2+8);ctx.quadraticCurveTo(cx-bw/2,y-bh/2,cx-bw/2+8,y-bh/2);ctx.closePath();ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 16px sans-serif';ctx.textAlign='center';ctx.fillText(labels[i],cx,y+6);if(i<n-1){var ny=(i+2)*gap-bh/2;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx,y+bh/2);ctx.lineTo(cx,ny);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,ny);ctx.lineTo(cx-8,ny-12);ctx.lineTo(cx+8,ny-12);ctx.closePath();ctx.fill()}}}
-    function drawChart(){var w=canvas.width,h=canvas.height;var bg=getStyleBg();ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);var d=STATE.chartData,l=STATE.chartLabels,t=STATE.chartTitle;switch(STATE.chartType){case'bar':drawBarChart(d,l,t);break;case'pie':drawPieChart(d,l,t);break;case'line':drawLineChart(d,l,t);break;case'flow':drawFlowChart(l.length>0?l:d.map(function(v){return''+v}));break}saveSnapshot();updateStatus()}
-    function saveCanvas(){var a=document.createElement('a');a.download='voicedraw-'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.png';a.href=canvas.toDataURL('image/png');a.click();speakFeedback('画作已保存');addLogEntry('Save','saved','success')}
+    function drawBarChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var lw=Math.min(w,h),pad=lw*0.08,chartW=w-pad*2,chartH=h-pad*3,bg=chartW*0.08,bw=(chartW-bg*(n+1))/n,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(w-pad*0.5,h-pad*1.8);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(pad,pad*0.5);ctx.stroke();for(var i=0;i<n;i++){var x=pad+bg+i*(bw+bg),bh=data[i]/maxV*chartH*0.85,y=h-pad*1.8-bh,col=getStyleColors().bars[i%5];ctx.fillStyle=col;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.strokeRect(x,y,bw,bh);ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.max(10,bw*0.35)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(data[i],x+bw/2,y-4);if(labels&&labels[i]){ctx.fillStyle=getStyleColors().label;ctx.font=Math.max(8,bw*0.25)+'px SimSun,serif';ctx.fillText(labels[i],x+bw/2,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(lw*0.03)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}ctx.fillStyle=getStyleColors().label;ctx.font=Math.round(lw*0.018)+'px SimSun,serif';ctx.textAlign='right';for(var t=0;t<=4;t++){var tv=Math.round(maxV*t/4),ty=h-pad*1.8-tv/maxV*chartH*0.85;ctx.fillText(tv,pad-6,ty+4);ctx.beginPath();ctx.moveTo(pad-3,ty);ctx.lineTo(pad,ty);ctx.strokeStyle=getStyleColors().grid;ctx.stroke()}}
+    function drawPieChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var cx=w*0.38,cy=h*0.48,r=Math.min(w,h)*0.28,total=0;for(var i=0;i<n;i++)total+=data[i];if(total===0)return;var sa=-Math.PI/2;for(var i=0;i<n;i++){var slice=data[i]/total*Math.PI*2,col=getStyleColors().pie[i%5];ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,sa,sa+slice);ctx.closePath();ctx.fill();ctx.strokeStyle='#222';ctx.lineWidth=2;ctx.stroke();var ma=sa+slice/2,lx=cx+Math.cos(ma)*r*0.6,ly=cy+Math.sin(ma)*r*0.6;ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(r*0.2)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(Math.round(data[i]/total*100)+'%',lx,ly);sa+=slice}var lx=w*0.68,ly=cy-r;for(var i=0;i<n;i++){ctx.fillStyle='hsl('+(i*360/n)+',65%,55%)';ctx.fillRect(lx,ly+i*35,14,14);ctx.fillStyle='#ccc';ctx.font=Math.round(r*0.15)+'px SimSun,serif';ctx.textAlign='left';ctx.fillText((labels&&labels[i]?labels[i]:'项目'+(i+1))+' ('+data[i]+')',lx+18,ly+i*35+12)}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(r*0.22)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,cx,cy-r-15)}}
+    function drawLineChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n<2)return;var pad=Math.min(w,h)*0.08,chartW=w-pad*2,chartH=h-pad*2.5,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(w-pad*0.5,h-pad*2);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(pad,pad);ctx.stroke();ctx.strokeStyle='#333';ctx.lineWidth=0.5;for(var i=1;i<=4;i++){var gy=h-pad*2-i*chartH/4;ctx.beginPath();ctx.moveTo(pad,gy);ctx.lineTo(w-pad*0.5,gy);ctx.stroke()}ctx.strokeStyle=getStyleColors().line;ctx.lineWidth=3;ctx.beginPath();var pts=[];for(var i=0;i<n;i++){var px=pad+i/(n-1)*chartW,py=h-pad*2-data[i]/maxV*chartH*0.85;pts.push({x:px,y:py});if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py)}ctx.stroke();ctx.fillStyle='rgba(79,195,247,0.15)';ctx.lineTo(pts[n-1].x,h-pad*2);ctx.lineTo(pts[0].x,h-pad*2);ctx.closePath();ctx.fill();for(var i=0;i<n;i++){ctx.fillStyle='#4fc3f7';ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,5,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#ccc';ctx.font=Math.round(pad*0.25)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(data[i],pts[i].x,pts[i].y-12);if(labels&&labels[i]){ctx.fillStyle='#888';ctx.fillText(labels[i],pts[i].x,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(pad*0.35)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}}
+    function drawFlowChart(labels){var w=canvas.width,h=canvas.height,n=labels.length;if(n<2)return;var bw=Math.min(w*0.25,180),bh=50,gap=h/(n+1),cx=w/2;for(var i=0;i<n;i++){var y=(i+1)*gap,col='hsl('+(i*360/n)+',60%,45%)';ctx.fillStyle='rgba(30,30,50,0.85)';ctx.beginPath();ctx.moveTo(cx-bw/2+8,y-bh/2);ctx.lineTo(cx+bw/2-8,y-bh/2);ctx.quadraticCurveTo(cx+bw/2,y-bh/2,cx+bw/2,y-bh/2+8);ctx.lineTo(cx+bw/2,y+bh/2-8);ctx.quadraticCurveTo(cx+bw/2,y+bh/2,cx+bw/2-8,y+bh/2);ctx.lineTo(cx-bw/2+8,y+bh/2);ctx.quadraticCurveTo(cx-bw/2,y+bh/2,cx-bw/2,y+bh/2-8);ctx.lineTo(cx-bw/2,y-bh/2+8);ctx.quadraticCurveTo(cx-bw/2,y-bh/2,cx-bw/2+8,y-bh/2);ctx.closePath();ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle=getStyleColors().title;ctx.font='bold 16px SimSun,serif';ctx.textAlign='center';ctx.fillText(labels[i],cx,y+6);if(i<n-1){var ny=(i+2)*gap-bh/2;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx,y+bh/2);ctx.lineTo(cx,ny);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,ny);ctx.lineTo(cx-8,ny-12);ctx.lineTo(cx+8,ny-12);ctx.closePath();ctx.fill()}}}
+    function drawChart(overrideBg){var w=canvas.width,h=canvas.height;var bg=overrideBg||getStyleBg();if(bg==='rgba(0,0,0,0)')ctx.clearRect(0,0,w,h);else{ctx.fillStyle=bg;ctx.fillRect(0,0,w,h)}var d=STATE.chartData,l=STATE.chartLabels,t=STATE.chartTitle;switch(STATE.chartType){case'bar':drawBarChart(d,l,t);break;case'pie':drawPieChart(d,l,t);break;case'line':drawLineChart(d,l,t);break;case'flow':drawFlowChart(l.length>0?l:d.map(function(v){return''+v}));break}saveSnapshot();updateStatus()}
+    // ---- Hi-res chart export (3x white bg) ----
+    STATE.exportDone=false;
+    function saveCanvas(){exportChart()}
+    function exportChart(){
+        var scale=3,ow=canvas.width,oh=canvas.height;
+        var a=document.createElement('a');a.download='chart-'+Date.now()+'.png';
+        document.body.appendChild(a);a.style.display='none';
+        var prevStyle=STATE.chartStyle,snap=ctx.getImageData(0,0,ow,oh);
+        canvas.width=ow*scale;canvas.height=oh*scale;ctx.imageSmoothingEnabled=true;
+        STATE.chartStyle='minimal';drawChartWithConfig('#ffffff');
+        var oc=document.createElement('canvas');oc.width=canvas.width;oc.height=canvas.height;
+        var octx=oc.getContext('2d');octx.imageSmoothingEnabled=false;octx.drawImage(canvas,0,0);
+        a.href=oc.toDataURL('image/png');a.click();
+        canvas.width=ow;canvas.height=oh;ctx.putImageData(snap,0,0);
+        STATE.chartStyle=prevStyle;drawChartWithConfig();document.body.removeChild(a);
+        speakFeedback('已导出成功，请问您要继续画图还是结束？');STATE.exportDone=true;addLogEntry('Save','white 3x','success');
+    }
 
     // ======================== Chart Wizard v5.3 (robust step-by-step) ========================
     function chartWizardStart(type,question){
@@ -1458,9 +1486,9 @@
         // Step -22: asking each label
         if(w.step===-22){w.labels.push(raw.replace(/[。，！？、,.!?]+$/g,'').trim());w.labelIdx++;if(w.labelIdx<w.labelCount){speakFeedback('好的，第'+(w.labelIdx+1)+'个标签呢？')}else{STATE.chartLabels=w.labels;drawChart();w.step=-3;speakFeedback('标签已更新！需要添加标题吗？说"要"或"不要"')}return}
         // Step -3: asking yes/no for title
-        if(w.step===-3){if(isNo(raw)){chartWizardFinish()}else if(isYes(raw)){w.step=-4;speakFeedback('好的，标题是什么？')}else{w.step=-4;w.title=raw.replace(/[。，！？、,.!?]+$/g,'').trim();STATE.chartTitle=w.title;drawChart();chartWizardFinish()}return}
+        if(w.step===-3){if(isNo(raw)){chartWizardFinish()}else if(isYes(raw)){w.step=-4;speakFeedback('好的，标题是什么？')}else{w.step=-4;w.title=cleanText(raw);STATE.chartTitle=w.title;drawChart();chartWizardFinish()}return}
         // Step -4: asking title content
-        if(w.step===-4){w.title=raw.trim();STATE.chartTitle=w.title;drawChart();chartWizardFinish();return}
+        if(w.step===-4){w.title=cleanText(raw);STATE.chartTitle=w.title;drawChart();chartWizardFinish();return}
         // Step 0: asking count
         if(w.step===0){var n=extractNumber(raw);if(!n||n<1){speakFeedback('请说一个数字，比如5');return}
             w.count=n;w.step=1;w.currentIdx=0;
@@ -1478,8 +1506,8 @@
     }
     function chartWizardLabels(raw){chartWizardAnswer(raw)}
     function chartWizardTitle(raw){chartWizardAnswer(raw)}
-    function chartWizardFinish(){STATE.chartWizard.active=false;STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#fff',titleSize:20,labelSize:14,barWidth:0};speakFeedback('图表已完成，需要修改吗？你可以说将第一根柱子改为金色、将标题改为红色、将标题内容改为销售额等，说不用继续');addLogEntry('Wizard','done','success')}
-    function cleanText(s){return s.replace(/[。，！？、,.!?]+$/g,'').replace(/\.$/,'').trim()}
+    function chartWizardFinish(){STATE.chartWizard.active=false;STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:-0.6};speakFeedback('图表已完成，需要修改吗？');if(STATE.chartType==='bar')showHint('柱状图修改指令:',EDIT_HINTS);addLogEntry('Wizard','done','success')}
+    function cleanText(s){return s.replace(/[。，！？、,.!?~.]+$/g,'').replace(/[。，！？、,.!?~.]/g,'').trim()}
     // Chart element editing - uses matchColor for any color support
     function chartEdit(raw){
         var cfg=STATE.chartConfig;if(!cfg)return;
@@ -1503,14 +1531,16 @@
         }else if(isBar){
             if(targetCol){if(!cfg.barColors)cfg.barColors=[];if(idx>=0&&idx<STATE.chartData.length)cfg.barColors[idx]=targetCol;else for(var i=0;i<STATE.chartData.length;i++)cfg.barColors[i]=targetCol;speakFeedback(idx>=0?'第'+(idx+1)+'根柱子已改为新颜色':'所有柱子已改为新颜色')}
             if(raw.indexOf('加粗')>=0){cfg.barWidth=(cfg.barWidth||0)+0.3;speakFeedback('柱子已加粗')}
-            if(raw.indexOf('变细')>=0||raw.indexOf('变窄')>=0){cfg.barWidth=Math.max(-0.6,(cfg.barWidth||0)-0.3);speakFeedback('柱子已变细')}
+            if(raw.indexOf('变细')>=0||raw.indexOf('变窄')>=0){cfg.barWidth=Math.max(-1.2,(cfg.barWidth||0)-0.3);speakFeedback('柱子已变细')}
         }
         drawChartWithConfig();
     }
     // Draw chart using chartConfig for per-element styling
-    function drawChartWithConfig(){
+    function drawChartWithConfig(overrideBg){
         var cfg=STATE.chartConfig,w=canvas.width,h=canvas.height;
-        ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,w,h);var d=STATE.chartData,l=STATE.chartLabels,t=STATE.chartTitle;
+        var bg=overrideBg||getStyleBg();
+        if(bg==='rgba(0,0,0,0)')ctx.clearRect(0,0,w,h);else{ctx.fillStyle=bg;ctx.fillRect(0,0,w,h)}
+        var d=STATE.chartData,l=STATE.chartLabels,t=STATE.chartTitle;
         switch(STATE.chartType){
             case'bar':drawBarChartCfg(d,l,t,cfg);break;
             case'pie':drawPieChartCfg(d,l,t,cfg);break;
@@ -1527,20 +1557,23 @@
         // Chart drawing area
         var chartTop=titleTop+pad*0.3, chartBot=h-pad*1.8-labelBot, chartH=chartBot-chartTop;
         var chartW=w-pad*2, bg=chartW*0.08;
-        var defBw=(chartW-bg*(n+1))/n, bwExtra=(cfg.barWidth||0)*defBw, bw=Math.max(4,defBw+bwExtra);
+        var defBw=(chartW-bg*(n+1))/n, bwExtra=(cfg.barWidth||0)*defBw, bw=Math.max(2,defBw+bwExtra);
+        // Proportional X-axis: shrinks when bars are thinner
+        var scaleX=1+(cfg.barWidth||0)*0.4; var adjChartW=chartW*Math.max(0.4,scaleX);
+        var adjBg=bg*Math.max(0.5,scaleX); var adjDefBw=(adjChartW-adjBg*(n+1))/n;
         var maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;
-        // Axes
         var axisY=chartBot; ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;
-        ctx.beginPath();ctx.moveTo(pad,axisY);ctx.lineTo(w-pad*0.5,axisY);ctx.stroke();
+        var axisRight=pad+adjBg+n*adjDefBw+(n-1)*adjBg+pad*0.1;
+        ctx.beginPath();ctx.moveTo(pad,axisY);ctx.lineTo(Math.min(w-pad*0.5,axisRight),axisY);ctx.stroke();
         ctx.beginPath();ctx.moveTo(pad,axisY);ctx.lineTo(pad,chartTop);ctx.stroke();
         // Bars
-        for(var i=0;i<n;i++){var x=pad+bg+i*(defBw+bg),bh=data[i]/maxV*chartH*0.92,y=axisY-bh;var col=(cfg.barColors&&cfg.barColors[i])?cfg.barColors[i]:getStyleColors().bars[i%5];ctx.fillStyle=col;ctx.fillRect(x-bwExtra/2,y,bw,bh);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.strokeRect(x-bwExtra/2,y,bw,bh);
-            ctx.fillStyle='#fff';ctx.font=Math.max(10,bw*0.35)+'px sans-serif';ctx.textAlign='center';ctx.fillText(data[i],x+bw/2-bwExtra/2,y-4);
-            if(labels&&labels[i]){var lc=(cfg.labelColors&&cfg.labelColors[i])?cfg.labelColors[i]:'#aaa';ctx.fillStyle=lc;ctx.font=(cfg.labelBold?'bold ':'')+ls+'px sans-serif';ctx.fillText(labels[i],x+bw/2-bwExtra/2,axisY+ls+4)}}
+        for(var i=0;i<n;i++){var x=pad+adjBg+i*(adjDefBw+adjBg),bh=data[i]/maxV*chartH*0.92,y=axisY-bh;var col=(cfg.barColors&&cfg.barColors[i])?cfg.barColors[i]:getStyleColors().bars[i%5];ctx.fillStyle=col;ctx.fillRect(x-bwExtra/2,y,bw,bh);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.strokeRect(x-bwExtra/2,y,bw,bh);
+            ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.max(8,bw*0.3)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(data[i],x+bw/2-bwExtra/2,y-4);
+            if(labels&&labels[i]){var lc=(cfg.labelColors&&cfg.labelColors[i])?cfg.labelColors[i]:'#aaa';ctx.fillStyle=lc;ctx.font=(cfg.labelBold?'bold ':'')+ls+'px SimSun,serif';ctx.fillText(labels[i],x+bw/2-bwExtra/2,axisY+ls+4)}}
         // Title
-        if(title){ctx.fillStyle=cfg.titleColor||'#fff';ctx.font=(cfg.titleBold?'bold ':'')+ts+'px sans-serif';ctx.textAlign='center';ctx.fillText(title,w/2,titleTop-ts*0.3)}
+        if(title){ctx.fillStyle=cfg.titleColor||'#fff';ctx.font=(cfg.titleBold?'bold ':'')+ts+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,w/2,titleTop-ts*0.3)}
         // Y-axis ticks
-        ctx.fillStyle='#888';ctx.font=Math.round(lw*0.018)+'px sans-serif';ctx.textAlign='right';
+        ctx.fillStyle='#888';ctx.font=Math.round(lw*0.018)+'px SimSun,serif';ctx.textAlign='right';
         for(var t=0;t<=4;t++){var tv=Math.round(maxV*t/4),ty=axisY-tv/maxV*chartH*0.92;ctx.fillText(tv,pad-6,ty+4);ctx.beginPath();ctx.moveTo(pad-3,ty);ctx.lineTo(pad,ty);ctx.strokeStyle=getStyleColors().grid;ctx.stroke()}
     }
     function drawPieChartCfg(data,labels,title,cfg){drawPieChart(data,labels,title)}
