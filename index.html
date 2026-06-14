@@ -1080,19 +1080,14 @@
     }
 
     function cmdHelp() {
-        const helpText = [
-            '可用指令：',
-            '画直线、画圆、画矩形 — 切换绘图模式',
-            '自由画 — 自由绘制模式',
-            '填充 — 点击区域填色',
-            '擦除 — 橡皮擦模式',
-            '红色、蓝色、绿色等 — 切换颜色',
-            '加粗、变细 — 调整线条',
-            '撤销 — 回退上一步',
-            '清空 — 清除画布',
-            '导出 — 保存图片',
-            '重置 — 恢复默认',
-            '说"帮助"可再次查看',
+        var helpText=[
+            '通用指令：画柱状图、画饼图、画折线图、画流程图、撤销、清空、重置、导出',
+            '柱状图修改：标题改为/放大/缩小/加粗/改色，标签改为/放大/缩小/加粗/改色，将第N根柱子改色，柱子加粗/变细',
+            '饼图修改：标题改为/放大/缩小/加粗/改色，标签改为/放大/缩小/加粗/改色，标签颜色批量修改',
+            '折线图修改：标题改为/放大/缩小/加粗/改色，标签改为/放大/缩小/加粗/改色，标签颜色批量修改',
+            '流程图修改：将第N个节点名称改为，放大/缩小/加粗节点名称/节点框，箭头变长/变短/加粗',
+            '风格切换：暖色风、商务风、科技风、简约风',
+            '说帮助可再次查看',
         ].join('；');
         speakFeedback(helpText);
         addLogEntry('💡', '显示帮助信息', 'success');
@@ -1103,9 +1098,9 @@
         var raw=text.trim();if(!raw)return;
         if(STATE.chartWizard.active){chartWizardAnswer(raw);return}
         if(STATE.exportDone){STATE.exportDone=false;if(raw.indexOf('继续')>=0||raw.indexOf('画图')>=0){clearCanvas();speakFeedback('画布已清空，请说出新的绘图指令');showHint('可用指令:',SHOW_HINTS);return}else{speakFeedback('已结束，感谢使用VoiceDraw AI');stopListening();return}}
-        // Chart edit interception: handle "需要" response
-        if(!STATE.chartWizard.active&&STATE.chartData.length>0){var t=raw.replace(/[。，！？、,.!? ]/g,'');if(t==='需要'||t==='要'||t==='好的'||t==='可以'||t==='行'||t==='是的'){speakFeedback('好的，请根据左侧显示的修改指令进行修改');if(STATE.chartType==='bar')showHint('柱状图修改指令:',EDIT_HINTS);return}}
-        if(!STATE.chartWizard.active&&STATE.chartData.length>0&&(raw.indexOf('标题')>=0||raw.indexOf('标签')>=0||(raw.indexOf('第')>=0&&(raw.indexOf('根')>=0||raw.indexOf('个')>=0))||raw.indexOf('柱子')>=0)){chartEdit(raw);return}
+        // Chart edit interception: handle "需要/不需要" response
+        if(!STATE.chartWizard.active&&STATE.chartData.length>0){var t=raw.replace(/[。，！？、,.!? ]/g,'');if(t==='需要'||t==='要'||t==='好的'||t==='可以'||t==='行'||t==='是的'){speakFeedback('好的，请根据左侧显示的修改指令进行修改');showHint('修改指令:',getEditHints());return}if(t==='不需要'||t==='不用'||t==='不要'||t==='不了'||t==='不'){speakFeedback('好的，有需要随时告诉我');hideHint();return}}
+        if(!STATE.chartWizard.active&&STATE.chartData.length>0&&(raw.indexOf('标题')>=0||raw.indexOf('标签')>=0||raw.indexOf('节点')>=0||raw.indexOf('箭头')>=0||(raw.indexOf('第')>=0&&(raw.indexOf('根')>=0||raw.indexOf('个')>=0))||raw.indexOf('柱子')>=0)){chartEdit(raw);return}
         alternatives=alternatives||[];
         var matched=false;
         for(var i=0;i<COMMAND_PATTERNS.length;i++){var pattern=COMMAND_PATTERNS[i];
@@ -1148,7 +1143,7 @@
         }
 
         if (!matched) {
-            speakFeedback('抱歉，我没有理解这个指令，请说"帮助"查看可用指令');
+            speakFeedback('抱歉，我没有识别这个指令，请再说一遍');
             addLogEntry('❌', `未识别: "${raw}"`, 'error');
             showVoiceOverlay('❌ 未识别: "' + raw + '"', 'final');
         }
@@ -1272,7 +1267,11 @@
 
     // ---- Top hint bar (collapsible, zero layout impact) ----
     var SHOW_HINTS=['画柱状图','画饼图','画折线图','画流程图','撤销','清空','重置'];
-    var EDIT_HINTS=['将第N根柱子改色','柱子加粗/变细','标题改为/放大/缩小/加粗','将第N个标签改为','标签放大/缩小/加粗','标题/标签改色','暖色风','商务风','科技风','简约风','撤销','导出'];
+    var EDIT_BAR=['将第N根柱子改色','柱子加粗/变细','标题改为/放大/缩小/加粗','将第N个标签改为','标签放大/缩小/加粗','标题/标签改色','暖色风','商务风','科技风','简约风','撤销','导出'];
+    var EDIT_PIE=['标题改为/放大/缩小/加粗','将第N个标签改为','标签放大/缩小/加粗','标签颜色批量修改','标题/标签改色','暖色风','商务风','科技风','简约风','撤销','导出'];
+    var EDIT_LINE=['标题改为/放大/缩小/加粗','将第N个标签改为','标签放大/缩小/加粗','标签颜色批量修改','标题/标签改色','暖色风','商务风','科技风','简约风','撤销','导出'];
+    var EDIT_FLOW=['将第N个节点名称改为','放大/缩小/加粗节点名称','放大/缩小/加粗节点框','箭头变长/变短/加粗','暖色风','商务风','科技风','简约风','撤销','导出'];
+    function getEditHints(){var t=STATE.chartType;if(t==='pie')return EDIT_PIE;if(t==='line')return EDIT_LINE;if(t==='flow')return EDIT_FLOW;return EDIT_BAR;}
     function showHint(title,items){
         var el=document.getElementById('hintBar');
         if(!el){el=document.createElement('div');el.id='hintBar';el.style.cssText='padding:6px 10px;font-size:0.72em;line-height:1.5;color:var(--text-secondary);background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border);cursor:pointer';el.onclick=function(){var c=this.querySelector('div:last-child');if(c)c.style.display=c.style.display==='none'?'block':'none'};var sidebar=document.querySelector('.sidebar');sidebar.insertBefore(el,sidebar.firstChild)}
@@ -1395,7 +1394,7 @@
     STATE.chartStyle='warm';
     STATE.chartType='bar'; STATE.chartData=[]; STATE.chartLabels=[]; STATE.chartTitle='';
     STATE.chartWizard={active:false,type:'',step:0,count:0,values:[],labels:[],title:''};
-    STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:-0.6};
+    STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:-0.6,flowNodeSize:0,flowArrowLen:0};
 
     // ======================== Shape Registry ========================
     function registerShape(type,params,color,fillColor,lineWidth){pushHistory('draw '+type);var s={id:STATE.nextShapeId++,type:type,color:color||STATE.currentColor,fillColor:fillColor||null,lineWidth:lineWidth||STATE.currentLineWidth,params:params};STATE.drawnShapes.push(s);STATE.lastDrawnShapeId=s.id;return s}
@@ -1434,8 +1433,9 @@
 
     function drawBarChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var lw=Math.min(w,h),pad=lw*0.08,chartW=w-pad*2,chartH=h-pad*3,bg=chartW*0.08,bw=(chartW-bg*(n+1))/n,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(w-pad*0.5,h-pad*1.8);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*1.8);ctx.lineTo(pad,pad*0.5);ctx.stroke();for(var i=0;i<n;i++){var x=pad+bg+i*(bw+bg),bh=data[i]/maxV*chartH*0.85,y=h-pad*1.8-bh,col=getStyleColors().bars[i%5];ctx.fillStyle=col;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.strokeRect(x,y,bw,bh);ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.max(10,bw*0.35)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(data[i],x+bw/2,y-4);if(labels&&labels[i]){ctx.fillStyle=getStyleColors().label;ctx.font=Math.max(8,bw*0.25)+'px SimSun,serif';ctx.fillText(labels[i],x+bw/2,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(lw*0.03)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}ctx.fillStyle=getStyleColors().label;ctx.font=Math.round(lw*0.018)+'px SimSun,serif';ctx.textAlign='right';for(var t=0;t<=4;t++){var tv=Math.round(maxV*t/4),ty=h-pad*1.8-tv/maxV*chartH*0.85;ctx.fillText(tv,pad-6,ty+4);ctx.beginPath();ctx.moveTo(pad-3,ty);ctx.lineTo(pad,ty);ctx.strokeStyle=getStyleColors().grid;ctx.stroke()}}
     function drawPieChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n===0)return;var cx=w*0.38,cy=h*0.48,r=Math.min(w,h)*0.28,total=0;for(var i=0;i<n;i++)total+=data[i];if(total===0)return;var sa=-Math.PI/2;for(var i=0;i<n;i++){var slice=data[i]/total*Math.PI*2,col=getStyleColors().pie[i%5];ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,sa,sa+slice);ctx.closePath();ctx.fill();ctx.strokeStyle='#222';ctx.lineWidth=2;ctx.stroke();var ma=sa+slice/2,lx=cx+Math.cos(ma)*r*0.6,ly=cy+Math.sin(ma)*r*0.6;ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(r*0.2)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(Math.round(data[i]/total*100)+'%',lx,ly);sa+=slice}var lx=w*0.68,ly=cy-r;for(var i=0;i<n;i++){ctx.fillStyle='hsl('+(i*360/n)+',65%,55%)';ctx.fillRect(lx,ly+i*35,14,14);ctx.fillStyle='#ccc';ctx.font=Math.round(r*0.15)+'px SimSun,serif';ctx.textAlign='left';ctx.fillText((labels&&labels[i]?labels[i]:'项目'+(i+1))+' ('+data[i]+')',lx+18,ly+i*35+12)}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(r*0.22)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,cx,cy-r-15)}}
-    function drawLineChart(data,labels,title){var w=canvas.width,h=canvas.height,n=data.length;if(n<2)return;var pad=Math.min(w,h)*0.08,chartW=w-pad*2,chartH=h-pad*2.5,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(w-pad*0.5,h-pad*2);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(pad,pad);ctx.stroke();ctx.strokeStyle='#333';ctx.lineWidth=0.5;for(var i=1;i<=4;i++){var gy=h-pad*2-i*chartH/4;ctx.beginPath();ctx.moveTo(pad,gy);ctx.lineTo(w-pad*0.5,gy);ctx.stroke()}ctx.strokeStyle=getStyleColors().line;ctx.lineWidth=3;ctx.beginPath();var pts=[];for(var i=0;i<n;i++){var px=pad+i/(n-1)*chartW,py=h-pad*2-data[i]/maxV*chartH*0.85;pts.push({x:px,y:py});if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py)}ctx.stroke();ctx.fillStyle='rgba(79,195,247,0.15)';ctx.lineTo(pts[n-1].x,h-pad*2);ctx.lineTo(pts[0].x,h-pad*2);ctx.closePath();ctx.fill();for(var i=0;i<n;i++){ctx.fillStyle='#4fc3f7';ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,5,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#ccc';ctx.font=Math.round(pad*0.25)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(data[i],pts[i].x,pts[i].y-12);if(labels&&labels[i]){ctx.fillStyle='#888';ctx.fillText(labels[i],pts[i].x,h-pad*1.2)}}if(title){ctx.fillStyle=getStyleColors().title;ctx.font='bold '+Math.round(pad*0.35)+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}}
-    function drawFlowChart(labels){var w=canvas.width,h=canvas.height,n=labels.length;if(n<2)return;var bw=Math.min(w*0.25,180),bh=50,gap=h/(n+1),cx=w/2;for(var i=0;i<n;i++){var y=(i+1)*gap,col='hsl('+(i*360/n)+',60%,45%)';ctx.fillStyle='rgba(30,30,50,0.85)';ctx.beginPath();ctx.moveTo(cx-bw/2+8,y-bh/2);ctx.lineTo(cx+bw/2-8,y-bh/2);ctx.quadraticCurveTo(cx+bw/2,y-bh/2,cx+bw/2,y-bh/2+8);ctx.lineTo(cx+bw/2,y+bh/2-8);ctx.quadraticCurveTo(cx+bw/2,y+bh/2,cx+bw/2-8,y+bh/2);ctx.lineTo(cx-bw/2+8,y+bh/2);ctx.quadraticCurveTo(cx-bw/2,y+bh/2,cx-bw/2,y+bh/2-8);ctx.lineTo(cx-bw/2,y-bh/2+8);ctx.quadraticCurveTo(cx-bw/2,y-bh/2,cx-bw/2+8,y-bh/2);ctx.closePath();ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle=getStyleColors().title;ctx.font='bold 16px SimSun,serif';ctx.textAlign='center';ctx.fillText(labels[i],cx,y+6);if(i<n-1){var ny=(i+2)*gap-bh/2;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx,y+bh/2);ctx.lineTo(cx,ny);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,ny);ctx.lineTo(cx-8,ny-12);ctx.lineTo(cx+8,ny-12);ctx.closePath();ctx.fill()}}}
+    function drawLineChart(data,labels,title,cfg){var w=canvas.width,h=canvas.height,n=data.length;if(n<2)return;var pad=Math.min(w,h)*0.08,chartW=w-pad*2,chartH=h-pad*2.5,maxV=Math.max.apply(null,data);if(maxV===0)maxV=1;ctx.strokeStyle=getStyleColors().axis;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(w-pad*0.5,h-pad*2);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,h-pad*2);ctx.lineTo(pad,pad);ctx.stroke();ctx.strokeStyle='#333';ctx.lineWidth=0.5;for(var i=1;i<=4;i++){var gy=h-pad*2-i*chartH/4;ctx.beginPath();ctx.moveTo(pad,gy);ctx.lineTo(w-pad*0.5,gy);ctx.stroke()}ctx.strokeStyle=getStyleColors().line;ctx.lineWidth=3;ctx.beginPath();var pts=[];for(var i=0;i<n;i++){var px=pad+i/(n-1)*chartW,py=h-pad*2-data[i]/maxV*chartH*0.85;pts.push({x:px,y:py});if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py)}ctx.stroke();ctx.fillStyle='rgba(79,195,247,0.15)';ctx.lineTo(pts[n-1].x,h-pad*2);ctx.lineTo(pts[0].x,h-pad*2);ctx.closePath();ctx.fill();var ls=cfg&&cfg.labelSize?cfg.labelSize:Math.round(pad*0.25);for(var i=0;i<n;i++){ctx.fillStyle='#4fc3f7';ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,5,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();var dc=cfg&&cfg.labelColors&&cfg.labelColors[i]?cfg.labelColors[i]:'#ccc';ctx.fillStyle=dc;ctx.font=(cfg&&cfg.labelBold?'bold ':'')+ls+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(data[i],pts[i].x,pts[i].y-12);if(labels&&labels[i]){var llc=cfg&&cfg.labelColors&&cfg.labelColors[i]?cfg.labelColors[i]:'#888';ctx.fillStyle=llc;ctx.fillText(labels[i],pts[i].x,h-pad*1.2)}}var ts=cfg&&cfg.titleSize?cfg.titleSize:Math.round(pad*0.35);if(title){var tc=cfg&&cfg.titleColor?cfg.titleColor:getStyleColors().title;ctx.fillStyle=tc;ctx.font=(cfg&&cfg.titleBold?'bold ':'')+ts+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(title,w/2,pad*0.6)}}
+    function drawLineChartCfg(data,labels,title,cfg){drawLineChart(data,labels,title,cfg)}
+    function drawFlowChart(labels,cfg){var w=canvas.width,h=canvas.height,n=labels.length;if(n<2)return;var st=getStyleColors();var style=STATE.chartStyle;var nodeBg,nodeText;if(style==='warm'){nodeBg='rgba(255,248,225,0.92)';nodeText='#5d4037'}else if(style==='business'){nodeBg='rgba(227,242,253,0.92)';nodeText='#1a3a5c'}else if(style==='tech'){nodeBg='rgba(30,40,60,0.90)';nodeText='#e6edf3'}else{nodeBg='rgba(245,245,245,0.92)';nodeText='#37474f'}var ns=cfg&&cfg.flowNodeSize?cfg.flowNodeSize:0;var al=cfg&&cfg.flowArrowLen?cfg.flowArrowLen:0;var bw=Math.min(w*0.25,180)+ns*10,bh=50+ns*8,gap=h/(n+1),cx=w/2;var nfs=(cfg&&cfg.labelSize?cfg.labelSize:16)+ns*2;var nodeLW=2+(cfg&&cfg.flowNodeBold?2:0);var arrowLW=2+(cfg&&cfg.flowArrowBold?2:0);var ucol=st.bars[0];for(var i=0;i<n;i++){var y=(i+1)*gap,col=ucol;ctx.fillStyle=nodeBg;ctx.beginPath();ctx.moveTo(cx-bw/2+8,y-bh/2);ctx.lineTo(cx+bw/2-8,y-bh/2);ctx.quadraticCurveTo(cx+bw/2,y-bh/2,cx+bw/2,y-bh/2+8);ctx.lineTo(cx+bw/2,y+bh/2-8);ctx.quadraticCurveTo(cx+bw/2,y+bh/2,cx+bw/2-8,y+bh/2);ctx.lineTo(cx-bw/2+8,y+bh/2);ctx.quadraticCurveTo(cx-bw/2,y+bh/2,cx-bw/2,y+bh/2-8);ctx.lineTo(cx-bw/2,y-bh/2+8);ctx.quadraticCurveTo(cx-bw/2,y-bh/2,cx-bw/2+8,y-bh/2);ctx.closePath();ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=nodeLW;ctx.stroke();ctx.fillStyle=nodeText;ctx.font=(cfg&&cfg.labelBold?'bold ':'')+nfs+'px SimSun,serif';ctx.textAlign='center';ctx.fillText(labels[i],cx,y+6);if(i<n-1){var ny=(i+2)*gap-bh/2;var arrowH=12+al*2;ctx.strokeStyle=col;ctx.lineWidth=arrowLW;ctx.beginPath();ctx.moveTo(cx,y+bh/2);ctx.lineTo(cx,ny+al);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,ny+al);ctx.lineTo(cx-8,ny+al-arrowH);ctx.lineTo(cx+8,ny+al-arrowH);ctx.closePath();ctx.fill()}}}
     function drawChart(overrideBg){var w=canvas.width,h=canvas.height;var bg=overrideBg||getStyleBg();if(bg==='rgba(0,0,0,0)')ctx.clearRect(0,0,w,h);else{ctx.fillStyle=bg;ctx.fillRect(0,0,w,h)}var d=STATE.chartData,l=STATE.chartLabels,t=STATE.chartTitle;switch(STATE.chartType){case'bar':drawBarChart(d,l,t);break;case'pie':drawPieChart(d,l,t);break;case'line':drawLineChart(d,l,t);break;case'flow':drawFlowChart(l.length>0?l:d.map(function(v){return''+v}));break}saveSnapshot();updateStatus()}
     // ---- Hi-res chart export (3x white bg) ----
     STATE.exportDone=false;
@@ -1476,7 +1476,7 @@
         var w=STATE.chartWizard;if(!w.active)return;
         // Step -1: asking yes/no for labels
         if(w.step===-1){
-            if(isNo(raw)){w.step=-3;speakFeedback('好的，需要添加标题吗？说"要"或"不要"')}
+            if(isNo(raw)){w.step=-3;speakFeedback('好的，需要添加标题吗')}
             else if(isYes(raw)){w.step=-21;speakFeedback('需要添加几个标签呢？')}
             else{var n=extractNumber(raw);if(n){w.step=-21;w.labelCount=n;w.labels=[];w.labelIdx=0;speakFeedback('好的，共'+n+'个标签。第1个标签是什么？')}else{speakFeedback('请说"需要"或"不需要"')}}
             return
@@ -1484,7 +1484,7 @@
         // Step -21: asking label count
         if(w.step===-21){var n=extractNumber(raw);if(!n){speakFeedback('请说一个数字，比如3');return}w.labelCount=n;w.labels=[];w.labelIdx=0;w.step=-22;speakFeedback('好的，共'+n+'个标签。第1个标签是什么？');return}
         // Step -22: asking each label
-        if(w.step===-22){w.labels.push(raw.replace(/[。，！？、,.!?]+$/g,'').trim());w.labelIdx++;if(w.labelIdx<w.labelCount){speakFeedback('好的，第'+(w.labelIdx+1)+'个标签呢？')}else{STATE.chartLabels=w.labels;drawChart();w.step=-3;speakFeedback('标签已更新！需要添加标题吗？说"要"或"不要"')}return}
+        if(w.step===-22){w.labels.push(raw.replace(/[。，！？、,.!?]+$/g,'').trim());w.labelIdx++;if(w.labelIdx<w.labelCount){speakFeedback('好的，第'+(w.labelIdx+1)+'个标签呢？')}else{STATE.chartLabels=w.labels;drawChart();w.step=-3;speakFeedback('标签已更新！需要添加标题吗')}return}
         // Step -3: asking yes/no for title
         if(w.step===-3){if(isNo(raw)){chartWizardFinish()}else if(isYes(raw)){w.step=-4;speakFeedback('好的，标题是什么？')}else{w.step=-4;w.title=cleanText(raw);STATE.chartTitle=w.title;drawChart();chartWizardFinish()}return}
         // Step -4: asking title content
@@ -1501,12 +1501,12 @@
             w.currentIdx++;
             if(w.currentIdx<w.count){speakFeedback('好的，第'+(w.currentIdx+1)+(w.type==='flow'?'个节点':'个')+'呢？')}
             else{STATE.chartData=w.values;STATE.chartLabels=w.labels;STATE.chartTitle=w.title;drawChart();
-                if(w.type==='flow'){speakFeedback('流程图已绘制完成！')}else{var msg=w.type==='bar'?'柱子画好了':w.type==='pie'?'饼图画好了':'折线图画好了';w.step=-1;speakFeedback(msg+'！需要添加标签吗？说"需要"或"不需要"')}}
+                if(w.type==='flow'){chartWizardFinish()}else{var msg=w.type==='bar'?'柱子画好了':w.type==='pie'?'饼图画好了':'折线图画好了';w.step=-1;speakFeedback(msg+'！需要添加标签吗')}}
         }
     }
     function chartWizardLabels(raw){chartWizardAnswer(raw)}
     function chartWizardTitle(raw){chartWizardAnswer(raw)}
-    function chartWizardFinish(){STATE.chartWizard.active=false;STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:-0.6};speakFeedback('图表已完成，需要修改吗？');if(STATE.chartType==='bar')showHint('柱状图修改指令:',EDIT_HINTS);addLogEntry('Wizard','done','success')}
+    function chartWizardFinish(){STATE.chartWizard.active=false;STATE.chartConfig={barColors:[],labelColors:[],titleColor:'#000000',titleSize:16,labelSize:16,barWidth:-0.6,flowNodeSize:0,flowArrowLen:0};speakFeedback('图表已完成，需要修改吗？');showHint('修改指令:',getEditHints());addLogEntry('Wizard','done','success')}
     function cleanText(s){return s.replace(/[。，！？、,.!?~.]+$/g,'').replace(/[。，！？、,.!?~.]/g,'').trim()}
     // Chart element editing - uses matchColor for any color support
     function chartEdit(raw){
@@ -1514,7 +1514,7 @@
         var cn={'一':0,'二':1,'三':2,'四':3,'五':4,'六':5,'七':6,'八':7,'九':8,'十':9,'1':0,'2':1,'3':2,'4':3,'5':4,'6':5,'7':6,'8':7,'9':8,'10':9};
         var idx=-1;for(var k in cn){if(raw.indexOf('第'+k)>=0||raw.indexOf(k+'个')>=0||raw.indexOf(k+'根')>=0){idx=cn[k];break}}
         var cm=matchColor(raw); var targetCol=cm?cm.hex:null;
-        var isTitle=raw.indexOf('标题')>=0; var isLabel=raw.indexOf('标签')>=0; var isBar=raw.indexOf('柱子')>=0;
+        var isTitle=raw.indexOf('标题')>=0; var isLabel=raw.indexOf('标签')>=0&&raw.indexOf('节点')<0; var isNode=raw.indexOf('节点名称')>=0||(raw.indexOf('节点')>=0&&raw.indexOf('节点框')<0); var isBar=raw.indexOf('柱子')>=0; var isFlow=raw.indexOf('箭头')>=0||raw.indexOf('节点框')>=0;
         var newText=null;if(raw.indexOf('改为')>=0||raw.indexOf('改成')>=0){var parts=raw.split(/改为|改成/);if(parts.length>1)newText=cleanText(parts[1])}
         if(isTitle){
             if(newText){STATE.chartTitle=cleanText(newText);speakFeedback('标题已改为 '+STATE.chartTitle)}
@@ -1528,10 +1528,25 @@
             if(raw.indexOf('放大')>=0){cfg.labelSize=Math.min(24,(cfg.labelSize||14)+2);speakFeedback('标签已放大')}
             if(raw.indexOf('缩小')>=0){cfg.labelSize=Math.max(8,(cfg.labelSize||14)-2);speakFeedback('标签已缩小')}
             if(raw.indexOf('加粗')>=0){cfg.labelBold=!cfg.labelBold;speakFeedback('标签已'+(cfg.labelBold?'加粗':'取消加粗'))}
+        }else if(isNode){
+            if(newText&&idx>=0&&idx<STATE.chartLabels.length){STATE.chartLabels[idx]=cleanText(newText);speakFeedback('第'+(idx+1)+'个节点名称已改为 '+STATE.chartLabels[idx])}
+            if(raw.indexOf('放大')>=0){cfg.labelSize=Math.min(36,(cfg.labelSize||16)+2);speakFeedback('已放大所有节点名称')}
+            if(raw.indexOf('缩小')>=0){cfg.labelSize=Math.max(10,(cfg.labelSize||16)-2);speakFeedback('已缩小所有节点名称')}
+            if(raw.indexOf('加粗')>=0){cfg.labelBold=!cfg.labelBold;speakFeedback('已'+(cfg.labelBold?'加粗':'取消加粗')+'所有节点名称')}
         }else if(isBar){
             if(targetCol){if(!cfg.barColors)cfg.barColors=[];if(idx>=0&&idx<STATE.chartData.length)cfg.barColors[idx]=targetCol;else for(var i=0;i<STATE.chartData.length;i++)cfg.barColors[i]=targetCol;speakFeedback(idx>=0?'第'+(idx+1)+'根柱子已改为新颜色':'所有柱子已改为新颜色')}
             if(raw.indexOf('加粗')>=0){cfg.barWidth=(cfg.barWidth||0)+0.3;speakFeedback('柱子已加粗')}
             if(raw.indexOf('变细')>=0||raw.indexOf('变窄')>=0){cfg.barWidth=Math.max(-1.2,(cfg.barWidth||0)-0.3);speakFeedback('柱子已变细')}
+        }else if(isFlow){
+            if(raw.indexOf('节点框')>=0){
+                if(raw.indexOf('放大')>=0){cfg.flowNodeSize=(cfg.flowNodeSize||0)+1;speakFeedback('已放大所有节点框')}
+                if(raw.indexOf('缩小')>=0){cfg.flowNodeSize=Math.max(-3,(cfg.flowNodeSize||0)-1);speakFeedback('已缩小所有节点框')}
+                if(raw.indexOf('加粗')>=0){cfg.flowNodeBold=!cfg.flowNodeBold;speakFeedback('已加粗所有节点框边框')}
+            }else if(raw.indexOf('箭头')>=0){
+                if(raw.indexOf('变长')>=0||raw.indexOf('放大')>=0){cfg.flowArrowLen=(cfg.flowArrowLen||0)+2;speakFeedback('已将所有箭头变长')}
+                if(raw.indexOf('变短')>=0||raw.indexOf('缩小')>=0){cfg.flowArrowLen=Math.max(-6,(cfg.flowArrowLen||0)-2);speakFeedback('已将所有箭头变短')}
+                if(raw.indexOf('加粗')>=0){cfg.flowArrowBold=!cfg.flowArrowBold;speakFeedback('已加粗所有箭头线条')}
+            }
         }
         drawChartWithConfig();
     }
@@ -1544,6 +1559,8 @@
         switch(STATE.chartType){
             case'bar':drawBarChartCfg(d,l,t,cfg);break;
             case'pie':drawPieChartCfg(d,l,t,cfg);break;
+            case'line':drawLineChartCfg(d,l,t,cfg);break;
+            case'flow':drawFlowChart(l.length>0?l:d.map(function(v){return''+v}),cfg);break;
             default:drawChart();break;
         }
         saveSnapshot();updateStatus();
@@ -1612,3 +1629,4 @@
     </script>
 </body>
 </html>
+// pr14
